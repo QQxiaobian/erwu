@@ -15,20 +15,26 @@
 
 ### 方式一：Docker Compose（推荐 NAS 使用）
 
+直接从 GitHub 拉取代码并启动：
+
 ```bash
-cd erwu
+git clone https://github.com/QQxiaobian/erwu.git
+cd erwu/erwu
 # 可选：自定义初始管理员密码
 ADMIN_PASSWORD='换成你的密码' docker compose up -d --build
 ```
 
 服务监听 `3000` 端口，浏览器访问 `http://NAS_IP:3000`。
 
-数据目录挂载在 `./data`，升级只需替换代码后重新 `docker compose up -d --build`，账号与对局记录保留。
+数据目录挂载在 `./data`，升级只需 `git pull` 后重新 `docker compose up -d --build`，账号与对局记录保留。
+
+> 若群晖等图形界面使用容器管理器，可导入仓库后用「docker-compose.yml」直接创建容器。
 
 ### 方式二：直接运行 Node
 
 ```bash
-cd erwu
+git clone https://github.com/QQxiaobian/erwu.git
+cd erwu/erwu
 npm install
 npm start
 ```
