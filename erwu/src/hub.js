@@ -229,6 +229,12 @@ export class Hub {
       case 'room.ready':
         res = room.setReady(user.id, msg.ready);
         break;
+      case 'room.addbot':
+        res = room.addBot(user.id);
+        break;
+      case 'room.removebot':
+        res = room.removeBot(user.id);
+        break;
       case 'room.start':
         res = room.startRound(user.id);
         break;

@@ -454,6 +454,7 @@ function renderFelt() {
       }
       const badges = [];
       if (s.isDeclarer) badges.push(`<span class="badge declarer">庄</span>`);
+      if (s.isBot) badges.push(`<span class="badge bot">人机</span>`);
       if (r.state === 'waiting' && s.ready) badges.push(`<span class="badge ready">已准备</span>`);
       if (r.mode === 'team') badges.push(`<span class="badge ${s.team === 0 ? 'team-a' : 'team-b'}">${s.team === 0 ? 'A队' : 'B队'}</span>`);
       if (r.state !== 'waiting') badges.push(`<span class="badge">${s.cardCount} 张</span>`);
@@ -475,6 +476,7 @@ function centerHTML() {
   const r = state.room;
   if (r.state === 'waiting') {
     const count = r.seats.filter((s) => !s.empty).length;
+    const bots = r.seats.filter((s) => !s.empty && s.isBot).length;
     const full = count >= r.maxSeats;
     const me = r.seats[r.mySeat];
     const ready = me && !me.empty ? me.ready : false;
@@ -489,10 +491,12 @@ function centerHTML() {
         ${r.isHost
           ? `<button class="btn primary" data-action="start" ${r.canStart ? '' : 'disabled'}>开始牌局</button>`
           : `<button class="btn ${ready ? 'ghost' : 'primary'}" data-action="ready">${ready ? '取消准备' : '准备'}</button>`}
+        ${r.isHost ? `<button class="btn ghost" data-action="addbot" ${full ? 'disabled' : ''}>添加人机</button>` : ''}
+        ${r.isHost && bots > 0 ? `<button class="btn ghost" data-action="removebot">移除人机</button>` : ''}
         <button class="btn ghost" data-action="copy">复制房间号</button>
         <button class="btn ghost" data-action="leave">离开</button>
       </div>
-      ${r.isHost && !full ? '<div class="wait-note">等待玩家坐满后即可开始</div>' : ''}
+      ${r.isHost && !full ? '<div class="wait-note">等待玩家坐满后即可开始，也可添加人机补位</div>' : ''}
     </div>`;
   }
 
@@ -722,12 +726,16 @@ function phasePlaying(r) {
 }
 
 function phaseFinished(r) {
+  const count = r.seats.filter((s) => !s.empty).length;
+  const bots = r.seats.filter((s) => !s.empty && s.isBot).length;
   return `<div>
       <div class="phase-title">${esc(r.result ? r.result.title : '本局结束')}</div>
       <div class="phase-desc">${esc(r.result ? r.result.detail : '')}</div>
     </div>
     <div class="phase-actions">
       <button class="btn small ghost" data-action="show-result">查看结果</button>
+      ${r.isHost ? `<button class="btn small ghost" data-action="addbot" ${count >= r.maxSeats ? 'disabled' : ''}>添加人机</button>` : ''}
+      ${r.isHost && bots > 0 ? '<button class="btn small ghost" data-action="removebot">移除人机</button>' : ''}
       ${r.canStart ? `<button class="btn small primary" data-action="start">再来一局</button>` : ''}
       <button class="btn small ghost" data-action="leave">返回大厅</button>
     </div>`;
@@ -854,6 +862,12 @@ async function handleAction(action, el) {
       send({ t: 'room.ready', ready: !(me && me.ready) });
       break;
     }
+    case 'addbot':
+      send({ t: 'room.addbot' });
+      break;
+    case 'removebot':
+      send({ t: 'room.removebot' });
+      break;
     case 'leave':
       if (r && r.state !== 'waiting' && r.state !== 'finished') {
         if (!confirm('牌局进行中，离开后将自动托管。确定离开吗？')) return;

@@ -529,6 +529,7 @@ button, input, select { font: inherit; }
   border: 1px solid rgba(246, 236, 214, 0.12);
 }
 .badge.declarer { background: rgba(217, 180, 95, 0.18); color: var(--gold-bright); border-color: rgba(217, 180, 95, 0.5); }
+.badge.bot { background: rgba(150, 130, 220, 0.18); color: #c9bcff; border-color: rgba(150, 130, 220, 0.45); }
 .badge.ready { background: rgba(120, 210, 160, 0.15); color: #a8e6c4; border-color: rgba(120, 210, 160, 0.4); }
 .badge.team-a { background: rgba(88, 160, 220, 0.15); color: #9dcbf3; border-color: rgba(88, 160, 220, 0.35); }
 .badge.team-b { background: rgba(220, 120, 88, 0.15); color: #f3b59d; border-color: rgba(220, 120, 88, 0.35); }

@@ -277,5 +277,66 @@ test('噶点叫分必须 5 的倍数且递增', () => {
   assert.ok(room.bid(`u${next}`, 65).ok);
 });
 
+console.log('人机');
+function newBotRoom(mode, n) {
+  const room = new Room({ id: 'B1', name: 'bot', mode, maxSeats: n, hostId: 'u0' });
+  room.addPlayer({ id: 'u0', username: 'p0', nickname: '玩家0' });
+  while (!room.full) assert.ok(room.addBot('u0').ok);
+  return room;
+}
+
+function runBotGame(room) {
+  let now = Date.now();
+  let guard = 0;
+  while (room.state !== 'finished') {
+    if (++guard > 6000) throw new Error('人机对局没有结束');
+    now += 1000;
+    room.tick(now);
+  }
+}
+
+test('人机补位：房主可添加/移除，非房主不可', () => {
+  const room = new Room({ id: 'B2', name: 'bot', mode: 'grab', maxSeats: 3, hostId: 'u0' });
+  room.addPlayer({ id: 'u0', username: 'p0', nickname: '玩家0' });
+  assert.ok(room.addBot('u0').ok);
+  assert.ok(room.seats.filter((s) => s && s.isBot).length === 1);
+  assert.ok(!room.addBot('u1').ok);
+  assert.ok(room.removeBot('u0').ok);
+  assert.equal(room.seats.filter((s) => s && s.isBot).length, 0);
+  assert.ok(!room.removeBot('u0').ok);
+});
+
+for (const mode of ['grab', 'team', 'ga']) {
+  test(`${mode} 模式：1 名真人 + 人机自动完成对局`, () => {
+    const room = newBotRoom(mode, mode === 'grab' ? 3 : 4);
+    const r = room.startRound('u0');
+    assert.ok(r.ok, r.error);
+    runBotGame(room);
+    assert.equal(room.state, 'finished');
+    const res = room.result;
+    assert.ok(res);
+    const expected = 100 + res.bottomPoints * (res.bottomDoubled ? 2 : 1);
+    assert.equal(res.declarerPoints + res.defenderPoints, expected);
+    assert.ok(room.seats.filter(Boolean).every((s) => s.hand.length === 0));
+  });
+}
+
+test('房主离开时房主身份不会转给人机', () => {
+  const room = new Room({ id: 'B3', name: 'bot', mode: 'grab', maxSeats: 4, hostId: 'u0' });
+  for (const u of seatUsers(3)) room.addPlayer(u);
+  addBotOk(room);
+  room.leave('u0');
+  assert.equal(room.hostId, 'u1');
+  // 真人全部离开后清空座位，房间可被回收
+  room.leave('u1');
+  room.leave('u2');
+  room.leave('u3');
+  assert.ok(room.seats.every((s) => !s));
+});
+
+function addBotOk(room) {
+  assert.ok(room.addBot('u0').ok);
+}
+
 console.log(`\n通过 ${passed} 项测试`);
 if (process.exitCode) process.exit(process.exitCode);

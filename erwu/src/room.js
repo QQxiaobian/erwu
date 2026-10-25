@@ -29,6 +29,8 @@ const BID_MS = 20000;
 const BURY_MS = 60000;
 const RESOLVE_MS = 1200;
 
+const BOT_NAMES = ['阿五', '小十', '老K', '王炸', '铁蛋', '黑桃', '红梅', '方片', '顺子', '同花'];
+
 export class Room {
   constructor({ id, name, mode, maxSeats, hostId }) {
     const info = MODE_INFO[mode];
@@ -63,6 +65,11 @@ export class Room {
     this.turn = null;
     this.result = null;
     this.onRoundEnd = null;
+
+    this.botSeq = 0;
+    this.botPassed = new Set();
+    this.botKey = null;
+    this.botAt = 0;
   }
 
   _touch() {
@@ -84,6 +91,11 @@ export class Room {
     this.log.push({ at: Date.now(), text, kind });
     if (this.log.length > 80) this.log.splice(0, this.log.length - 80);
     this._touch();
+  }
+
+  _autoTag(seat, isAuto) {
+    if (!isAuto) return '';
+    return seat && seat.isBot ? '（人机）' : '（托管）';
   }
 
   get full() {
@@ -115,6 +127,44 @@ export class Room {
     return { ok: true, seat: idx };
   }
 
+  addBot(userId) {
+    if (userId !== this.hostId) return { ok: false, error: '只有房主可以添加人机' };
+    if (this.state !== 'waiting' && this.state !== 'finished') {
+      return { ok: false, error: '牌局进行中无法添加人机' };
+    }
+    const idx = this.seats.indexOf(null);
+    if (idx < 0) return { ok: false, error: '房间已满' };
+    this.botSeq++;
+    const base = BOT_NAMES[(this.botSeq - 1) % BOT_NAMES.length];
+    const name = this.botSeq > BOT_NAMES.length ? `${base}${Math.ceil(this.botSeq / BOT_NAMES.length)}` : base;
+    this.seats[idx] = {
+      userId: `bot:${this.id}:${this.botSeq}`,
+      username: `bot${this.botSeq}`,
+      name: `机器人·${name}`,
+      isBot: true,
+      connected: true,
+      ready: true,
+      hand: [],
+      captured: 0,
+    };
+    this._log(`人机 ${this.seats[idx].name} 加入房间（${idx + 1} 号位）`, 'join');
+    this._touch();
+    return { ok: true, seat: idx };
+  }
+
+  removeBot(userId) {
+    if (userId !== this.hostId) return { ok: false, error: '只有房主可以移除人机' };
+    if (this.state !== 'waiting' && this.state !== 'finished') {
+      return { ok: false, error: '牌局进行中无法移除人机' };
+    }
+    const idx = this.seats.map((s, i) => (s && s.isBot ? i : -1)).filter((i) => i >= 0).pop();
+    if (idx === undefined) return { ok: false, error: '房间里没有人机' };
+    this._log(`人机 ${this.seats[idx].name} 被移出房间`, 'leave');
+    this.seats[idx] = null;
+    this._touch();
+    return { ok: true };
+  }
+
   leave(userId) {
     const idx = this.seatOf(userId);
     if (idx < 0) return { ok: false, error: '你不在该房间' };
@@ -123,14 +173,15 @@ export class Room {
       this.seats[idx] = null;
       this._log(`${seat.name} 离开了房间`, 'leave');
       if (this.hostId === userId) {
-        const next = this.seats.find((s) => s);
+        const next = this.seats.find((s) => s && !s.isBot);
         if (next) this.hostId = next.userId;
       }
+      if (!this.seats.some((s) => s && !s.isBot)) this.seats.fill(null);
       this._touch();
     } else {
       seat.connected = false;
       if (this.hostId === userId) {
-        const next = this.seats.find((s) => s && s.connected);
+        const next = this.seats.find((s) => s && s.connected && !s.isBot);
         if (next) this.hostId = next.userId;
       }
       this._log(`${seat.name} 断线，进入托管`, 'warn');
@@ -211,6 +262,7 @@ export class Room {
   _initDeclaration(redeal = false) {
     this.state = 'declaring';
     this.declaration = { list: [], passed: new Set(), last: null };
+    this.botPassed = new Set();
     this.trumpSuit = null;
     this.declarerSeat = null;
     this.deadline = Date.now() + (redeal ? 12000 : DECLARE_MS);
@@ -326,7 +378,7 @@ export class Room {
     if (value === 'pass') {
       b.passed.add(seatIdx);
       b.history.push({ seat: seatIdx, value: 'pass' });
-      this._log(`${seat.name}${isAuto ? '（托管）' : ''} 选择过`, 'bid');
+      this._log(`${seat.name}${this._autoTag(seat, isAuto)} 选择过`, 'bid');
       if (b.highestBidder === null && b.passed.size >= this.maxSeats) {
         return this._finishBidding();
       }
@@ -348,7 +400,7 @@ export class Room {
     b.highestBidder = seatIdx;
     b.passed.delete(seatIdx);
     b.history.push({ seat: seatIdx, value: val });
-    this._log(`${seat.name}${isAuto ? '（托管）' : ''} 叫 ${val} 分`, 'bid');
+    this._log(`${seat.name}${this._autoTag(seat, isAuto)} 叫 ${val} 分`, 'bid');
     if (this._othersPassed(seatIdx)) return this._finishBidding();
     this._advanceBidTurn(seatIdx);
     return { ok: true };
@@ -422,7 +474,7 @@ export class Room {
     this.trick = { lead: null, plays: [] };
     this.lastTrick = null;
     this.pendingResolveAt = null;
-    this._log(`${seat.name}${isAuto ? '（托管）' : ''} 已扣底，主花色 ${SUIT_NAMES[suit]}，开始出牌`, 'round');
+    this._log(`${seat.name}${this._autoTag(seat, isAuto)} 已扣底，主花色 ${SUIT_NAMES[suit]}，开始出牌`, 'round');
     this._touch();
     return { ok: true };
   }
@@ -487,14 +539,14 @@ export class Room {
       seat.hand = seat.hand.filter((c) => !idSet.has(c.id));
       this.lastTrick = null;
       this.trick = { lead: { seat: seatIdx, cards, type }, plays: [{ seat: seatIdx, cards }] };
-      this._log(`${seat.name}${isAuto ? '（托管）' : ''} 首出 ${cardsName(cards)}${type === 'throw' ? '（甩牌）' : ''}`, 'play');
+      this._log(`${seat.name}${this._autoTag(seat, isAuto)} 首出 ${cardsName(cards)}${type === 'throw' ? '（甩牌）' : ''}`, 'play');
     } else {
       const check = validateFollow(seat.hand, cards, this.trick.lead, this.trumpSuit);
       if (!check.ok) return { ok: false, error: check.reason };
       const idSet = new Set(cards.map((c) => c.id));
       seat.hand = seat.hand.filter((c) => !idSet.has(c.id));
       this.trick.plays.push({ seat: seatIdx, cards });
-      this._log(`${seat.name}${isAuto ? '（托管）' : ''} 跟出 ${cardsName(cards)}`, 'play');
+      this._log(`${seat.name}${this._autoTag(seat, isAuto)} 跟出 ${cardsName(cards)}`, 'play');
     }
 
     if (this.trick.plays.length >= this.maxSeats) {
@@ -675,9 +727,89 @@ export class Room {
     this._touch();
   }
 
+  _botKey() {
+    if (this.state === 'declaring') {
+      const bots = this.seats.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.isBot);
+      if (!bots.length) return null;
+      const pending = bots.filter((x) => !this.botPassed.has(x.i));
+      if (!pending.length) return null;
+      return `declare:${this.roundNo}:${this.redeals}:${this.declaration && this.declaration.last ? 'pass' : 'open'}:${this.botPassed.size}`;
+    }
+    if (this.state === 'bidding') {
+      const t = this.bidding && this.bidding.turn;
+      const s = t === null || t === undefined ? null : this.seats[t];
+      return s && s.isBot ? `bid:${this.roundNo}:${t}:${this.bidding.history.length}` : null;
+    }
+    if (this.state === 'burying') {
+      const s = this.seats[this.declarerSeat];
+      return s && s.isBot ? `bury:${this.roundNo}` : null;
+    }
+    if (this.state === 'playing' && !this.pendingResolveAt) {
+      const s = this.turn === null || this.turn === undefined ? null : this.seats[this.turn];
+      return s && s.isBot
+        ? `play:${this.roundNo}:${this.turn}:${this.trick.plays.length}:${s.hand.length}`
+        : null;
+    }
+    return null;
+  }
+
+  _actBot() {
+    if (this.state === 'declaring') {
+      const bots = this.seats.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.isBot);
+      if (this.declaration && this.declaration.last) {
+        const next = bots.find((x) => !this.botPassed.has(x.i));
+        if (next) {
+          this.botPassed.add(next.i);
+          this.passDeclaration(next.s.userId);
+        }
+        return;
+      }
+      const holder = bots.find((x) => !this.botPassed.has(x.i) && x.s.hand.some((c) => c.r === '2'));
+      if (holder) {
+        const two = holder.s.hand.find((c) => c.r === '2');
+        this.botPassed.add(holder.i);
+        this.declare(holder.s.userId, [two.id]);
+        return;
+      }
+      const next = bots.find((x) => !this.botPassed.has(x.i));
+      if (next) {
+        this.botPassed.add(next.i);
+        this.passDeclaration(next.s.userId);
+      }
+      return;
+    }
+    if (this.state === 'bidding') {
+      this._bidSeat(this.bidding.turn, 'pass', true);
+      return;
+    }
+    if (this.state === 'burying') {
+      this._autoBury();
+      return;
+    }
+    if (this.state === 'playing') {
+      this._autoPlay(this.turn);
+    }
+  }
+
   tick(now = Date.now()) {
     if (!this.deadline) return false;
     let changed = false;
+
+    const botKey = this._botKey();
+    if (botKey) {
+      if (botKey !== this.botKey) {
+        this.botKey = botKey;
+        const openDeclare = this.state === 'declaring' && !(this.declaration && this.declaration.last);
+        this.botAt = now + (openDeclare ? 5000 : 900);
+      } else if (now >= this.botAt) {
+        this.botKey = null;
+        this._actBot();
+        return true;
+      }
+    } else {
+      this.botKey = null;
+    }
+
     if (this.state === 'declaring' && now >= this.deadline) {
       this._finalizeDeclaration();
       changed = true;
@@ -726,6 +858,7 @@ export class Room {
           (this.state === 'burying' && this.declarerSeat === i),
         team: teamOf(i),
         me: i === mySeat,
+        isBot: !!s.isBot,
       };
     });
 
