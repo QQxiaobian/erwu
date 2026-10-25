@@ -1,0 +1,788 @@
+import {
+  SUITS,
+  SUIT_NAMES,
+  makeDeck,
+  shuffle,
+  isTrump,
+  power,
+  sortHand,
+  cardPoints,
+  handPoints,
+  isCombo25,
+  detectLead,
+  checkThrow,
+  validateFollow,
+  resolveTrick,
+  cardsName,
+  autoSelect,
+} from './game/cards.js';
+
+export const MODE_INFO = {
+  grab: { name: '抢庄模式', seats: [3, 4], desc: '亮 2 定主，25 反主，一人坐庄' },
+  team: { name: '队家模式', seats: [4], desc: '固定 4 人 2V2，对家为队友' },
+  ga: { name: '噶点模式', seats: [4], desc: '叫分定庄，庄家自选主花色' },
+};
+
+const TURN_MS = 30000;
+const DECLARE_MS = 15000;
+const BID_MS = 20000;
+const BURY_MS = 60000;
+const RESOLVE_MS = 1200;
+
+export class Room {
+  constructor({ id, name, mode, maxSeats, hostId }) {
+    const info = MODE_INFO[mode];
+    if (!info) throw new Error('未知玩法');
+    this.id = id;
+    this.name = name;
+    this.mode = mode;
+    this.maxSeats = maxSeats;
+    this.hostId = hostId;
+    this.seats = new Array(maxSeats).fill(null);
+    this.state = 'waiting';
+    this.roundNo = 0;
+    this.version = 0;
+    this.log = [];
+    this.createdAt = Date.now();
+    this.deadline = null;
+
+    this.trumpSuit = null;
+    this.declarerSeat = null;
+    this.bidValue = null;
+    this.bidding = null;
+    this.declaration = null;
+    this.redeals = 0;
+
+    this.bottomPool = [];
+    this.bottom = [];
+    this.bottomRevealed = false;
+
+    this.trick = { lead: null, plays: [] };
+    this.lastTrick = null;
+    this.pendingResolveAt = null;
+    this.turn = null;
+    this.result = null;
+    this.onRoundEnd = null;
+  }
+
+  _touch() {
+    this.version++;
+  }
+
+  _delayFor(seatIdx, base) {
+    const s = this.seats[seatIdx];
+    if (!s || !s.connected) return Math.min(base, 6000);
+    return base;
+  }
+
+  _buryDelay() {
+    const s = this.seats[this.declarerSeat];
+    return s && s.connected ? BURY_MS : 12000;
+  }
+
+  _log(text, kind = 'info') {
+    this.log.push({ at: Date.now(), text, kind });
+    if (this.log.length > 80) this.log.splice(0, this.log.length - 80);
+    this._touch();
+  }
+
+  get full() {
+    return this.seats.every(Boolean);
+  }
+
+  seatOf(userId) {
+    return this.seats.findIndex((s) => s && s.userId === userId);
+  }
+
+  addPlayer(user) {
+    if (this.state !== 'waiting' && this.state !== 'finished') {
+      return { ok: false, error: '牌局已开始，无法加入' };
+    }
+    if (this.seatOf(user.id) >= 0) return { ok: true };
+    const idx = this.seats.indexOf(null);
+    if (idx < 0) return { ok: false, error: '房间已满' };
+    const name = user.nickname || user.username;
+    this.seats[idx] = {
+      userId: user.id,
+      username: user.username,
+      name,
+      connected: true,
+      ready: false,
+      hand: [],
+      captured: 0,
+    };
+    this._log(`${name} 加入房间（${idx + 1} 号位）`, 'join');
+    return { ok: true, seat: idx };
+  }
+
+  leave(userId) {
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    const seat = this.seats[idx];
+    if (this.state === 'waiting' || this.state === 'finished') {
+      this.seats[idx] = null;
+      this._log(`${seat.name} 离开了房间`, 'leave');
+      if (this.hostId === userId) {
+        const next = this.seats.find((s) => s);
+        if (next) this.hostId = next.userId;
+      }
+      this._touch();
+    } else {
+      seat.connected = false;
+      if (this.hostId === userId) {
+        const next = this.seats.find((s) => s && s.connected);
+        if (next) this.hostId = next.userId;
+      }
+      this._log(`${seat.name} 断线，进入托管`, 'warn');
+    }
+    return { ok: true };
+  }
+
+  setConnected(userId, connected) {
+    const idx = this.seatOf(userId);
+    if (idx < 0) return;
+    const seat = this.seats[idx];
+    if (seat.connected === connected) return;
+    seat.connected = connected;
+    if (this.state !== 'finished') {
+      this._log(`${seat.name}${connected ? '重新连接' : '断线，进入托管'}`, connected ? 'join' : 'warn');
+    }
+    this._touch();
+  }
+
+  setReady(userId, ready) {
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    if (this.state !== 'waiting') return { ok: false, error: '牌局已开始' };
+    this.seats[idx].ready = !!ready;
+    this._touch();
+    return { ok: true };
+  }
+
+  _deal() {
+    const deck = shuffle(makeDeck());
+    const per = Math.floor(48 / this.maxSeats);
+    let cursor = 0;
+    for (const seat of this.seats) {
+      seat.hand = deck.slice(cursor, cursor + per);
+      cursor += per;
+      seat.captured = 0;
+    }
+    this.bottomPool = deck.slice(cursor);
+    this.bottom = [];
+    this.bottomRevealed = false;
+    this.trumpSuit = null;
+    this.declarerSeat = null;
+    this.bidValue = null;
+    this.trick = { lead: null, plays: [] };
+    this.lastTrick = null;
+    this.pendingResolveAt = null;
+    this.turn = null;
+    this.result = null;
+    this.deadline = null;
+  }
+
+  startRound(userId) {
+    if (userId !== this.hostId) {
+      const hostSeat = this.seatOf(this.hostId);
+      const hostGone = hostSeat < 0 || !this.seats[hostSeat] || !this.seats[hostSeat].connected;
+      if (!hostGone) return { ok: false, error: '只有房主可以开始牌局' };
+    }
+    if (this.state !== 'waiting' && this.state !== 'finished') return { ok: false, error: '当前不能开始新一局' };
+    if (!this.full) return { ok: false, error: '座位还没有坐满' };
+
+    this.roundNo++;
+    this.redeals = 0;
+    this._deal();
+    this.declaration = null;
+    this.bidding = null;
+
+    if (this.mode === 'ga') {
+      this._initBidding();
+      this._log(`第 ${this.roundNo} 局开始，发牌完成，进入叫分`, 'round');
+    } else {
+      this._initDeclaration();
+      this._log(`第 ${this.roundNo} 局开始，发牌完成，请亮主`, 'round');
+    }
+    this._touch();
+    return { ok: true };
+  }
+
+  _initDeclaration(redeal = false) {
+    this.state = 'declaring';
+    this.declaration = { list: [], passed: new Set(), last: null };
+    this.trumpSuit = null;
+    this.declarerSeat = null;
+    this.deadline = Date.now() + (redeal ? 12000 : DECLARE_MS);
+    this._touch();
+  }
+
+  declare(userId, cardIds) {
+    if (this.state !== 'declaring') return { ok: false, error: '当前不是亮主阶段' };
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    const seat = this.seats[idx];
+    const ids = [...new Set(cardIds || [])];
+    if (ids.length !== (cardIds || []).length) return { ok: false, error: '牌重复' };
+    const cards = ids.map((id) => seat.hand.find((c) => c.id === id)).filter(Boolean);
+    if (cards.length !== ids.length) return { ok: false, error: '你没有这些牌' };
+
+    let kind;
+    let suit;
+    if (cards.length === 1 && cards[0].r === '2') {
+      kind = 'single2';
+      if (this.trumpSuit) return { ok: false, error: '已有亮主，只能用同花色 25 组合反主' };
+      suit = cards[0].s;
+    } else if (cards.length === 2 && isCombo25(cards, this.trumpSuit || SUITS[0])) {
+      if (!this.trumpSuit) return { ok: false, error: '请先用单张 2 亮主' };
+      suit = cards[0].s;
+      if (suit === this.trumpSuit) return { ok: false, error: '反主必须更换主花色' };
+      kind = 'combo25';
+    } else {
+      return { ok: false, error: '亮主只能用单张 2，反主只能用同花色 25 组合' };
+    }
+
+    this.trumpSuit = suit;
+    this.declarerSeat = idx;
+    this.declaration.passed.delete(idx);
+    this.declaration.last = { seat: idx, name: seat.name, suit, kind, cards: cards.map((c) => c.id), at: Date.now() };
+    this.declaration.list.push(this.declaration.last);
+    this._log(
+      `${seat.name} ${kind === 'single2' ? '亮主' : '反主'}：${cardsName(cards)}，${SUIT_NAMES[suit]}成为主花色`,
+      'declare',
+    );
+    this._touch();
+    return { ok: true };
+  }
+
+  passDeclaration(userId) {
+    if (this.state !== 'declaring') return { ok: false, error: '当前不是亮主阶段' };
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    this.declaration.passed.add(idx);
+    this._touch();
+    if (this.declaration.passed.size >= this.maxSeats) {
+      this._finalizeDeclaration();
+    }
+    return { ok: true };
+  }
+
+  _finalizeDeclaration() {
+    if (this.state !== 'declaring') return;
+    const last = this.declaration && this.declaration.last;
+    if (last) {
+      this.trumpSuit = last.suit;
+      this.declarerSeat = last.seat;
+      this._log(`定主：${SUIT_NAMES[last.suit]}，${last.name} 坐庄`, 'round');
+    } else if (this.redeals < 2) {
+      this.redeals++;
+      this._deal();
+      this._initDeclaration(true);
+      this._log('无人亮主，重新发牌', 'warn');
+      return;
+    } else {
+      const suit = SUITS[Math.floor(Math.random() * SUITS.length)];
+      this.trumpSuit = suit;
+      this.declarerSeat = 0;
+      this._log(`无人亮主，系统随机定主：${SUIT_NAMES[suit]}，${this.seats[0].name} 坐庄`, 'warn');
+    }
+    this.declaration = null;
+    this._pickupBottom();
+    this.state = 'burying';
+    this.deadline = Date.now() + this._buryDelay();
+    this._touch();
+  }
+
+  _pickupBottom() {
+    if (!this.bottomPool.length) return;
+    const seat = this.seats[this.declarerSeat];
+    seat.hand.push(...this.bottomPool);
+    this.bottomPool = [];
+    this._log(`${seat.name} 拿起 6 张底牌，正在扣底`, 'info');
+  }
+
+  _initBidding() {
+    this.state = 'bidding';
+    const candidate = (this.roundNo - 1) % this.maxSeats;
+    this.bidding = {
+      candidate,
+      currentBid: 55,
+      highestBidder: null,
+      turn: candidate,
+      passed: new Set(),
+      history: [],
+    };
+    this.deadline = Date.now() + this._delayFor(candidate, BID_MS);
+    this._log(`叫分开始，底分 55，由 ${this.seats[candidate].name} 先叫`, 'round');
+    this._touch();
+  }
+
+  _bidSeat(seatIdx, value, isAuto = false) {
+    if (this.state !== 'bidding') return { ok: false, error: '当前不是叫分阶段' };
+    if (!this.bidding || this.bidding.turn !== seatIdx) return { ok: false, error: '还没轮到你叫分' };
+    const seat = this.seats[seatIdx];
+    const b = this.bidding;
+
+    if (value === 'pass') {
+      b.passed.add(seatIdx);
+      b.history.push({ seat: seatIdx, value: 'pass' });
+      this._log(`${seat.name}${isAuto ? '（托管）' : ''} 选择过`, 'bid');
+      if (b.highestBidder === null && b.passed.size >= this.maxSeats) {
+        return this._finishBidding();
+      }
+      if (b.highestBidder !== null && this._othersPassed(b.highestBidder)) {
+        return this._finishBidding();
+      }
+      this._advanceBidTurn(seatIdx);
+      return { ok: true };
+    }
+
+    const val = Number(value);
+    if (!Number.isInteger(val) || val % 5 !== 0) return { ok: false, error: '叫分必须是 5 的倍数' };
+    if (b.highestBidder === null) {
+      if (val < 55) return { ok: false, error: '起叫分不能低于 55' };
+    } else if (val <= b.currentBid) {
+      return { ok: false, error: `必须高于当前 ${b.currentBid} 分` };
+    }
+    b.currentBid = val;
+    b.highestBidder = seatIdx;
+    b.passed.delete(seatIdx);
+    b.history.push({ seat: seatIdx, value: val });
+    this._log(`${seat.name}${isAuto ? '（托管）' : ''} 叫 ${val} 分`, 'bid');
+    if (this._othersPassed(seatIdx)) return this._finishBidding();
+    this._advanceBidTurn(seatIdx);
+    return { ok: true };
+  }
+
+  _othersPassed(seatIdx) {
+    const others = this.seats.map((_, i) => i).filter((i) => i !== seatIdx);
+    return others.every((i) => this.bidding.passed.has(i));
+  }
+
+  _advanceBidTurn(from) {
+    for (let i = 1; i <= this.maxSeats; i++) {
+      const s = (from + i) % this.maxSeats;
+      if (!this.bidding.passed.has(s)) {
+        this.bidding.turn = s;
+        this.deadline = Date.now() + this._delayFor(s, BID_MS);
+        this._touch();
+        return;
+      }
+    }
+    // 全部过牌
+    this._finishBidding();
+  }
+
+  bid(userId, value) {
+    if (this.state !== 'bidding') return { ok: false, error: '当前不是叫分阶段' };
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    return this._bidSeat(idx, value);
+  }
+
+  _finishBidding() {
+    const b = this.bidding;
+    if (!b) return { ok: false, error: '叫分状态异常' };
+    const declarer = b.highestBidder !== null ? b.highestBidder : b.candidate;
+    this.declarerSeat = declarer;
+    this.bidValue = b.highestBidder !== null ? b.currentBid : 55;
+    this.bidding = null;
+    this._log(`叫分结束：${this.seats[declarer].name} 以 ${this.bidValue} 分成为专家`, 'round');
+    this._pickupBottom();
+    this.state = 'burying';
+    this.deadline = Date.now() + this._buryDelay();
+    this._touch();
+    return { ok: true };
+  }
+
+  bury(userId, suit, cardIds) {
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    if (this.state !== 'burying') return { ok: false, error: '当前不是扣底阶段' };
+    if (idx !== this.declarerSeat) return { ok: false, error: '只有庄家可以扣底' };
+    const finalSuit = this.mode === 'ga' ? suit : this.trumpSuit;
+    if (!SUITS.includes(finalSuit)) return { ok: false, error: '请选择主花色' };
+    return this._burySeat(idx, finalSuit, cardIds, false);
+  }
+
+  _burySeat(idx, suit, cardIds, isAuto) {
+    const seat = this.seats[idx];
+    const ids = [...new Set(cardIds || [])];
+    if (ids.length !== 6) return { ok: false, error: '必须扣 6 张底牌' };
+    const cards = ids.map((id) => seat.hand.find((c) => c.id === id)).filter(Boolean);
+    if (cards.length !== 6) return { ok: false, error: '扣底牌不在手中' };
+    const idSet = new Set(ids);
+    seat.hand = seat.hand.filter((c) => !idSet.has(c.id));
+    this.trumpSuit = suit;
+    this.bottom = sortHand(cards, suit);
+    this.bottomPool = [];
+    this.state = 'playing';
+    this.turn = this.declarerSeat;
+    this.deadline = Date.now() + this._delayFor(this.turn, TURN_MS);
+    this.trick = { lead: null, plays: [] };
+    this.lastTrick = null;
+    this.pendingResolveAt = null;
+    this._log(`${seat.name}${isAuto ? '（托管）' : ''} 已扣底，主花色 ${SUIT_NAMES[suit]}，开始出牌`, 'round');
+    this._touch();
+    return { ok: true };
+  }
+
+  _autoBury() {
+    const idx = this.declarerSeat;
+    if (idx === null || idx === undefined) return;
+    const seat = this.seats[idx];
+    let suit = this.trumpSuit;
+    if (this.mode === 'ga') {
+      const counts = {};
+      for (const s of SUITS) counts[s] = 0;
+      for (const c of seat.hand) if (c.s !== 'J') counts[c.s] = (counts[c.s] || 0) + 1;
+      suit = SUITS.slice().sort((a, b) => counts[b] - counts[a])[0];
+    }
+    if (!suit) suit = 'S';
+    const sorted = seat.hand.slice().sort((a, b) => {
+      const pa = cardPoints(a) > 0 ? 1 : 0;
+      const pb = cardPoints(b) > 0 ? 1 : 0;
+      if (pa !== pb) return pa - pb;
+      return power(a, suit) - power(b, suit);
+    });
+    const ids = sorted.slice(0, 6).map((c) => c.id);
+    this._burySeat(idx, suit, ids, true);
+  }
+
+  play(userId, cardIds) {
+    const idx = this.seatOf(userId);
+    if (idx < 0) return { ok: false, error: '你不在该房间' };
+    return this._playSeat(idx, cardIds, false);
+  }
+
+  _playSeat(seatIdx, cardIds, isAuto) {
+    if (this.state !== 'playing') return { ok: false, error: '当前不是出牌阶段' };
+    if (this.turn !== seatIdx) return { ok: false, error: '还没轮到你出牌' };
+    if (this.pendingResolveAt) return { ok: false, error: '正在结算本墩' };
+    const seat = this.seats[seatIdx];
+    const ids = [...new Set(cardIds || [])];
+    if (ids.length !== (cardIds || []).length || ids.length === 0) return { ok: false, error: '选牌无效' };
+    let cards = ids.map((id) => seat.hand.find((c) => c.id === id)).filter(Boolean);
+    if (cards.length !== ids.length) return { ok: false, error: '你没有这些牌' };
+
+    const hasLead = !!this.trick.lead;
+    let note = '';
+
+    if (!hasLead) {
+      let type = detectLead(cards, this.trumpSuit);
+      if (!type) {
+        return { ok: false, error: '非法牌型：只能出单张、同花色 25 组合、金鸡或副牌甩牌' };
+      }
+      if (type === 'throw') {
+        const allHands = this.seats.map((s) => s.hand);
+        const check = checkThrow(cards, allHands, this.bottom, this.trumpSuit);
+        if (!check.ok) {
+          cards = [check.forced];
+          type = 'single';
+          note = `甩牌不成立，${check.forced.id} 不是该花色最大牌，自动只打出最小一张`;
+          this._log(`${seat.name} 甩牌违规，系统强制只打出 ${cardsName(cards)}`, 'warn');
+        }
+      }
+      const idSet = new Set(cards.map((c) => c.id));
+      seat.hand = seat.hand.filter((c) => !idSet.has(c.id));
+      this.lastTrick = null;
+      this.trick = { lead: { seat: seatIdx, cards, type }, plays: [{ seat: seatIdx, cards }] };
+      this._log(`${seat.name}${isAuto ? '（托管）' : ''} 首出 ${cardsName(cards)}${type === 'throw' ? '（甩牌）' : ''}`, 'play');
+    } else {
+      const check = validateFollow(seat.hand, cards, this.trick.lead, this.trumpSuit);
+      if (!check.ok) return { ok: false, error: check.reason };
+      const idSet = new Set(cards.map((c) => c.id));
+      seat.hand = seat.hand.filter((c) => !idSet.has(c.id));
+      this.trick.plays.push({ seat: seatIdx, cards });
+      this._log(`${seat.name}${isAuto ? '（托管）' : ''} 跟出 ${cardsName(cards)}`, 'play');
+    }
+
+    if (this.trick.plays.length >= this.maxSeats) {
+      this.turn = null;
+      this.deadline = Date.now() + RESOLVE_MS;
+      this.pendingResolveAt = Date.now() + RESOLVE_MS;
+    } else {
+      this.turn = (seatIdx + 1) % this.maxSeats;
+      this.deadline = Date.now() + this._delayFor(this.turn, TURN_MS);
+    }
+    this._touch();
+    return { ok: true, note };
+  }
+
+  _autoPlay(seatIdx) {
+    const seat = this.seats[seatIdx];
+    const picked = autoSelect(seat.hand, this.trick.lead, this.trumpSuit);
+    const res = this._playSeat(
+      seatIdx,
+      picked.map((c) => c.id),
+      true,
+    );
+    if (res.ok) return res;
+    // 极端兜底：尽量找一手合法牌
+    if (!this.trick.lead && seat.hand.length) {
+      const fallback = [seat.hand[0].id];
+      return this._playSeat(seatIdx, fallback, true);
+    }
+    this._log(`${seat.name} 托管自动出牌失败：${res.error}，等待玩家操作`, 'warn');
+    this.deadline = Date.now() + 8000;
+    this._touch();
+    return res;
+  }
+
+  _resolveTrick(now) {
+    if (!this.trick.lead) return;
+    const winner = resolveTrick(this.trick.lead, this.trick.plays, this.trumpSuit);
+    const allCards = this.trick.plays.flatMap((p) => p.cards);
+    const points = handPoints(allCards);
+    this.seats[winner].captured += points;
+    this.lastTrick = {
+      lead: this.trick.lead,
+      plays: this.trick.plays,
+      winner,
+      winnerName: this.seats[winner].name,
+      points,
+      at: now,
+    };
+    this._log(`${this.seats[winner].name} 赢得本墩${points ? `，获得 ${points} 分` : ''}`, 'trick');
+    this.trick = { lead: null, plays: [] };
+    this.pendingResolveAt = null;
+    this.turn = winner;
+    this.deadline = now + this._delayFor(winner, TURN_MS);
+
+    const done = this.seats.every((s) => s.hand.length === 0);
+    this._touch();
+    if (done) {
+      this._finishRound(winner);
+    } else {
+      const nextWinner = winner;
+      this.turn = nextWinner;
+    }
+  }
+
+  _finishRound(lastWinner) {
+    if (this.state === 'finished') return;
+    this.bottomRevealed = true;
+    const bottomPoints = handPoints(this.bottom);
+    const decl = this.declarerSeat;
+    const captured = this.seats.map((s) => s.captured);
+    const isDefenderLast = lastWinner !== decl;
+    const bottomToDeclarer = !isDefenderLast ? bottomPoints : 0;
+    const bottomToDefenders = isDefenderLast ? bottomPoints * 2 : 0;
+
+    let declarerPoints;
+    let defenderPoints;
+    let sides;
+    let winnerSide;
+    let title;
+    let detail;
+    let threshold = null;
+
+    if (this.mode === 'team') {
+      const declTeam = decl % 2;
+      const declSeats = [declTeam, declTeam + 2];
+      const defSeats = [1 - declTeam, 3 - declTeam];
+      declarerPoints = declSeats.reduce((n, i) => n + captured[i], 0) + bottomToDeclarer;
+      defenderPoints = defSeats.reduce((n, i) => n + captured[i], 0) + bottomToDefenders;
+      threshold = 45;
+      winnerSide = defenderPoints >= 45 ? 'defenders' : 'declarer';
+      sides = [
+        {
+          key: 'declarer',
+          name: '庄家队',
+          seats: declSeats,
+          points: declarerPoints,
+          won: winnerSide === 'declarer',
+        },
+        {
+          key: 'defenders',
+          name: '常家队',
+          seats: defSeats,
+          points: defenderPoints,
+          won: winnerSide === 'defenders',
+        },
+      ];
+      title = winnerSide === 'defenders' ? '常家队上庄！' : '庄家队守庄成功！';
+      detail = `常家队 ${defenderPoints} 分，${defenderPoints >= 45 ? '达到' : '未达到'} 45 分门槛`;
+    } else if (this.mode === 'ga') {
+      declarerPoints = captured[decl] + bottomToDeclarer;
+      defenderPoints = captured.reduce((n, v, i) => (i === decl ? n : n + v), 0) + bottomToDefenders;
+      winnerSide = declarerPoints >= this.bidValue ? 'declarer' : 'defenders';
+      sides = [
+        {
+          key: 'declarer',
+          name: `${this.seats[decl].name}（专家）`,
+          seats: [decl],
+          points: declarerPoints,
+          won: winnerSide === 'declarer',
+        },
+        { key: 'defenders', name: '抓分方', seats: [0, 1, 2, 3].filter((i) => i !== decl), points: defenderPoints, won: winnerSide === 'defenders' },
+      ];
+      title = winnerSide === 'declarer' ? '专家达标，守庄成功！' : '抓分方胜利！';
+      detail = `专家叫 ${this.bidValue} 分，实得 ${declarerPoints} 分`;
+    } else {
+      declarerPoints = captured[decl] + bottomToDeclarer;
+      defenderPoints = captured.reduce((n, v, i) => (i === decl ? n : n + v), 0) + bottomToDefenders;
+      threshold = 45;
+      winnerSide = defenderPoints >= 45 ? 'defenders' : 'declarer';
+      sides = [
+        {
+          key: 'declarer',
+          name: `${this.seats[decl].name}（专家）`,
+          seats: [decl],
+          points: declarerPoints,
+          won: winnerSide === 'declarer',
+        },
+        { key: 'defenders', name: '常家', seats: [0, 1, 2, 3].filter((i) => i < this.maxSeats && i !== decl), points: defenderPoints, won: winnerSide === 'defenders' },
+      ];
+      title = winnerSide === 'defenders' ? '常家胜利，重新抢庄！' : '专家守庄成功！';
+      detail = `常家 ${defenderPoints} 分，${defenderPoints >= 45 ? '达到' : '未达到'} 45 分门槛`;
+    }
+
+    this.result = {
+      mode: this.mode,
+      roundNo: this.roundNo,
+      declarerSeat: decl,
+      declarerName: this.seats[decl].name,
+      trumpSuit: this.trumpSuit,
+      bidValue: this.bidValue,
+      threshold,
+      bottomPoints,
+      bottomDoubled: isDefenderLast,
+      lastWinner,
+      lastWinnerName: this.seats[lastWinner].name,
+      captured,
+      declarerPoints,
+      defenderPoints,
+      winnerSide,
+      title,
+      detail,
+      sides,
+      bottom: sortHand(this.bottom, this.trumpSuit),
+      finishedAt: Date.now(),
+    };
+    this.state = 'finished';
+    this.deadline = null;
+    this.turn = null;
+    this.pendingResolveAt = null;
+    this._log(`本局结束：${title}（${detail}）`, 'result');
+    if (typeof this.onRoundEnd === 'function') {
+      try {
+        this.onRoundEnd(this, this.result);
+      } catch (e) {
+        console.error('onRoundEnd error', e);
+      }
+    }
+    this._touch();
+  }
+
+  tick(now = Date.now()) {
+    if (!this.deadline) return false;
+    let changed = false;
+    if (this.state === 'declaring' && now >= this.deadline) {
+      this._finalizeDeclaration();
+      changed = true;
+    } else if (this.state === 'bidding' && now >= this.deadline) {
+      const t = this.bidding && this.bidding.turn;
+      if (t !== null && t !== undefined) this._bidSeat(t, 'pass', true);
+      changed = true;
+    } else if (this.state === 'burying' && now >= this.deadline) {
+      this._autoBury();
+      changed = true;
+    } else if (this.state === 'playing') {
+      if (this.pendingResolveAt && now >= this.pendingResolveAt) {
+        this._resolveTrick(now);
+        changed = true;
+      } else if (this.turn !== null && this.turn !== undefined && now >= this.deadline) {
+        this._autoPlay(this.turn);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  viewFor(userId) {
+    const mySeat = this.seatOf(userId);
+    const hostSeat = this.seatOf(this.hostId);
+    const hostGone = hostSeat < 0 || !this.seats[hostSeat] || !this.seats[hostSeat].connected;
+    const showHand = mySeat >= 0 && this.state !== 'waiting';
+    const hand = showHand ? sortHand(this.seats[mySeat].hand, this.trumpSuit) : [];
+
+    const teamOf = (i) => (this.mode === 'team' ? i % 2 : null);
+
+    const seats = this.seats.map((s, i) => {
+      if (!s) return { seat: i, empty: true };
+      return {
+        seat: i,
+        userId: s.userId,
+        name: s.name,
+        connected: s.connected,
+        ready: s.ready,
+        cardCount: s.hand.length,
+        captured: s.captured,
+        isDeclarer: i === this.declarerSeat,
+        isTurn:
+          (this.state === 'playing' && this.turn === i) ||
+          (this.state === 'bidding' && this.bidding && this.bidding.turn === i) ||
+          (this.state === 'burying' && this.declarerSeat === i),
+        team: teamOf(i),
+        me: i === mySeat,
+      };
+    });
+
+    return {
+      v: this.version,
+      id: this.id,
+      name: this.name,
+      mode: this.mode,
+      modeName: MODE_INFO[this.mode].name,
+      maxSeats: this.maxSeats,
+      state: this.state,
+      hostId: this.hostId,
+      isHost: this.hostId === userId,
+      roundNo: this.roundNo,
+      seats,
+      mySeat,
+      hand,
+      handCount: hand.length,
+      trumpSuit: this.trumpSuit,
+      declarerSeat: this.declarerSeat,
+      bidValue: this.bidValue,
+      turn: this.turn,
+      deadline: this.deadline,
+      pendingResolve: !!this.pendingResolveAt,
+      trick: {
+        lead: this.trick.lead,
+        plays: this.trick.plays,
+      },
+      lastTrick: this.lastTrick,
+      declaration: this.state === 'declaring' && this.declaration
+        ? {
+            last: this.declaration.last,
+            passed: [...this.declaration.passed],
+            redeals: this.redeals,
+            deadline: this.deadline,
+          }
+        : null,
+      bidding: this.state === 'bidding' && this.bidding
+        ? {
+            candidate: this.bidding.candidate,
+            currentBid: this.bidding.currentBid,
+            highestBidder: this.bidding.highestBidder,
+            turn: this.bidding.turn,
+            passed: [...this.bidding.passed],
+            history: this.bidding.history,
+            deadline: this.deadline,
+          }
+        : null,
+      bottomCount: 6,
+      bottomRevealed: this.bottomRevealed,
+      bottom: this.bottomRevealed ? sortHand(this.bottom, this.trumpSuit) : null,
+      result: this.state === 'finished' ? this.result : null,
+      canStart:
+        (this.hostId === userId || hostGone) &&
+        (this.state === 'waiting' || this.state === 'finished') &&
+        this.full,
+      log: this.log.slice(-40),
+    };
+  }
+}

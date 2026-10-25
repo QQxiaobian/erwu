@@ -1,0 +1,19 @@
+{
+  "name": "erwu",
+  "version": "1.0.0",
+  "private": true,
+  "description": "《二五》扑克游戏 - NAS 自建多人网页版",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/rules.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

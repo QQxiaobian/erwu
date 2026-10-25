@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>二五 · 扑克游戏</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="toast-wrap" class="toast-wrap"></div>
+
+<!-- ================= 登录 / 注册 ================= -->
+<section id="screen-auth" class="screen active">
+  <div class="auth-bg"></div>
+  <div class="auth-card">
+    <div class="brand">
+      <div class="brand-mark">二五</div>
+      <div class="brand-en">ERWU · CARD GAME</div>
+      <div class="brand-sub">贰伍 · 好友同桌 · NAS 自建</div>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">登录</button>
+      <button class="auth-tab" data-tab="register">注册</button>
+    </div>
+    <form id="login-form" class="auth-form">
+      <label class="field">
+        <span>账号</span>
+        <input id="login-username" autocomplete="username" placeholder="输入账号" required />
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="输入密码" required />
+      </label>
+      <button class="btn primary block" type="submit">进入牌桌</button>
+    </form>
+    <form id="register-form" class="auth-form hidden">
+      <label class="field">
+        <span>账号</span>
+        <input id="reg-username" autocomplete="username" placeholder="2-20 位中文 / 字母 / 数字" required />
+      </label>
+      <label class="field">
+        <span>昵称</span>
+        <input id="reg-nickname" placeholder="牌桌上显示的名字" />
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input id="reg-password" type="password" autocomplete="new-password" placeholder="至少 4 位" required />
+      </label>
+      <button class="btn primary block" type="submit">创建账号</button>
+    </form>
+    <div class="auth-hint" id="auth-hint">首次部署默认管理员：admin / admin123</div>
+  </div>
+  <div class="auth-foot">单副牌 · 三玩法 · 好友开黑</div>
+</section>
+
+<!-- ================= 大厅 ================= -->
+<section id="screen-lobby" class="screen">
+  <header class="topbar">
+    <div class="logo-small">二五<span>ERWU</span></div>
+    <div class="topbar-center">
+      <span class="ws-dot" id="ws-dot"></span>
+      <span class="user-name" id="lobby-username">—</span>
+      <span class="user-tag hidden" id="lobby-admin-tag">管理员</span>
+    </div>
+    <div class="top-actions">
+      <button class="btn ghost small" id="open-rules-btn">规则</button>
+      <button class="btn ghost small hidden" id="open-admin-btn">管理</button>
+      <button class="btn ghost small" id="logout-btn">退出</button>
+    </div>
+  </header>
+  <main class="lobby">
+    <section class="rooms-panel">
+      <div class="panel-head">
+        <div>
+          <h2>牌桌大厅</h2>
+          <p class="muted">加入好友的房间，或自己开一桌</p>
+        </div>
+        <button class="btn ghost small" id="refresh-rooms">刷新</button>
+      </div>
+      <div id="room-list" class="room-list"></div>
+    </section>
+    <aside class="create-panel">
+      <h2>开一桌</h2>
+      <label class="field">
+        <span>房间名</span>
+        <input id="create-name" maxlength="20" placeholder="例如：周五夜局" />
+      </label>
+      <label class="field">
+        <span>玩法</span>
+        <select id="create-mode">
+          <option value="grab">抢庄模式（3 / 4 人）</option>
+          <option value="team">队家模式（4 人 2V2）</option>
+          <option value="ga">噶点模式（4 人叫分）</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>人数</span>
+        <select id="create-seats">
+          <option value="3">3 人</option>
+          <option value="4">4 人</option>
+        </select>
+      </label>
+      <button class="btn primary block" id="create-room">创建房间</button>
+      <div class="create-tip" id="mode-tip">亮 2 定主，25 反主，一人坐庄。</div>
+    </aside>
+  </main>
+</section>
+
+<!-- ================= 牌桌 ================= -->
+<section id="screen-table" class="screen">
+  <header class="table-topbar">
+    <button class="btn ghost small" id="table-leave">← 大厅</button>
+    <div class="room-title">
+      <span id="room-name">房间</span>
+      <button class="room-code" id="room-code" title="复制房间号">----</button>
+    </div>
+    <div class="room-meta" id="room-meta"></div>
+    <div class="turn-timer" id="turn-timer"></div>
+    <button class="btn ghost small" id="table-rules-btn">规则</button>
+  </header>
+
+  <div class="table-body">
+    <div class="felt-wrap">
+      <div class="felt" id="felt">
+        <div class="table-center" id="table-center"></div>
+      </div>
+    </div>
+    <aside class="side-panel">
+      <div class="side-block">
+        <div class="side-title">计分板</div>
+        <div id="scoreboard" class="scoreboard"></div>
+      </div>
+      <div class="side-block log-block">
+        <div class="side-title">牌局记录</div>
+        <div id="game-log" class="game-log"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="phase-panel hidden" id="phase-panel"></div>
+
+  <div class="hand-area" id="hand-area">
+    <div class="hand-top">
+      <div class="hand-meta" id="hand-meta"></div>
+      <div class="hand-actions" id="hand-actions"></div>
+    </div>
+    <div class="hand-scroll">
+      <div id="hand" class="hand"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 结果弹层 ================= -->
+<div class="overlay hidden" id="result-overlay">
+  <div class="modal result-modal" id="result-modal"></div>
+</div>
+
+<!-- ================= 管理后台 ================= -->
+<div class="overlay hidden" id="admin-overlay">
+  <div class="modal admin-modal">
+    <div class="modal-head">
+      <h2>账号管理</h2>
+      <button class="icon-btn" data-close="admin-overlay">×</button>
+    </div>
+    <div class="admin-body" id="admin-body"></div>
+  </div>
+</div>
+
+<!-- ================= 规则说明 ================= -->
+<div class="overlay hidden" id="rules-overlay">
+  <div class="modal rules-modal">
+    <div class="modal-head">
+      <h2>《二五》规则速览</h2>
+      <button class="icon-btn" data-close="rules-overlay">×</button>
+    </div>
+    <div class="rules-body">
+      <h3>牌力顺序（从大到小）</h3>
+      <p>任意花色 5 &gt; 大王 &gt; 小王 &gt; 任意花色 2 &gt; 本局主花色普通牌（A &gt; K &gt; Q &gt; J &gt; 10 &gt; 9 &gt; 8 &gt; 7 &gt; 6 &gt; 4 &gt; 3）&gt; 副牌。</p>
+      <p class="muted">同点数常主牌力相等：梅花 5 = 红桃 5；梅花 2 = 方块 2。</p>
+
+      <h3>合法牌型</h3>
+      <ul>
+        <li><b>单张</b>：任意一张牌。</li>
+        <li><b>25 组合</b>：同花色的 2 + 5，两张一起出，牌力高于任意单张主牌。</li>
+        <li><b>金鸡</b>：大王 + 小王一起出。金鸡直接赢墩，其余玩家有主牌必须出手里最大的一张主牌。</li>
+        <li><b>副牌甩牌</b>：首发多张同花色副牌，且每张都是全场该花色最大。违规时系统强制只打出最小一张。主牌不能甩。</li>
+      </ul>
+
+      <h3>跟牌与杀牌</h3>
+      <ul>
+        <li>单张：有同花色必须跟；没有可以垫副牌，或用 1 张主牌杀。</li>
+        <li>25 组合：每人跟 2 张，优先跟主牌；主牌不足可垫副牌。</li>
+        <li>金鸡：每人只跟 1 张，有主牌必须出最大主牌。</li>
+        <li>甩牌 N 张：每人跟 N 张；同花色不足可垫牌，或用 N 张主牌杀。杀牌张数必须与首出完全一致。</li>
+        <li>多牌组比大小只取每组最大的一张；有杀牌时副牌全部失效。</li>
+      </ul>
+
+      <h3>三种玩法</h3>
+      <ul>
+        <li><b>抢庄</b>：3/4 人，发牌阶段亮 2 定主，25 可反主。常家总分 ≥ 45 获胜，否则专家守庄。</li>
+        <li><b>队家</b>：固定 4 人，对家为队友。常家 ≥ 45 分上庄。</li>
+        <li><b>噶点</b>：固定 4 人，无亮主反主。顺位玩家起叫 55 分，每次 +5，最高者成为专家并自选主花色。专家得分 ≥ 叫分则胜。</li>
+      </ul>
+
+      <h3>抠底</h3>
+      <p>最后一墩由抓分方（常家 / 抓分方）获胜即抠底，底牌分数翻倍计入抓分方；庄家赢最后一墩则底牌分数正常计入庄家。</p>
+
+      <h3>操作提示</h3>
+      <p>亮主阶段可直接点击面板上的「亮主 / 反主」按钮；出牌阶段点击手牌选中，再点「出牌」。掉线会自动托管，托管不会主动亮主、反主或甩牌。</p>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

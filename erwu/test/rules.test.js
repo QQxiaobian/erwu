@@ -1,0 +1,281 @@
+import assert from 'node:assert/strict';
+import {
+  makeDeck,
+  cardPoints,
+  handPoints,
+  power,
+  isTrump,
+  detectLead,
+  checkThrow,
+  validateFollow,
+  resolveTrick,
+  isCombo25,
+  autoSelect,
+} from '../src/game/cards.js';
+import { Room } from '../src/room.js';
+
+let passed = 0;
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (e) {
+    console.error(`  ✗ ${name}`);
+    console.error(e);
+    process.exitCode = 1;
+  }
+}
+
+const c = (id) => {
+  if (id === 'BJ') return { id: 'BJ', s: 'J', r: 'BJ' };
+  if (id === 'LJ') return { id: 'LJ', s: 'J', r: 'SJ' };
+  return { id, s: id[0], r: id.slice(1) };
+};
+
+console.log('牌张与牌力');
+test('54 张牌、总分 100', () => {
+  const deck = makeDeck();
+  assert.equal(deck.length, 54);
+  assert.equal(handPoints(deck), 100);
+  assert.equal(new Set(deck.map((x) => x.id)).size, 54);
+});
+test('5 > 大王 > 小王 > 2 > 主花色普通牌 > 副牌', () => {
+  const t = 'S';
+  const seq = ['C5', 'BJ', 'LJ', 'D2', 'SA', 'SK', 'HA'].map((id) => power(c(id), t));
+  for (let i = 1; i < seq.length; i++) assert.ok(seq[i - 1] > seq[i], `${seq[i - 1]} > ${seq[i]}`);
+});
+test('同点数常主牌力相等', () => {
+  assert.equal(power(c('C5'), 'S'), power(c('H5'), 'S'));
+  assert.equal(power(c('C2'), 'S'), power(c('D2'), 'S'));
+});
+test('常主判定', () => {
+  assert.ok(isTrump(c('D5'), 'S'));
+  assert.ok(isTrump(c('H2'), 'S'));
+  assert.ok(isTrump(c('BJ'), 'S'));
+  assert.ok(isTrump(c('SA'), 'S'));
+  assert.ok(!isTrump(c('HA'), 'S'));
+});
+test('25 组合必须是同花色 2+5', () => {
+  assert.ok(isCombo25([c('C2'), c('C5')], 'S'));
+  assert.ok(!isCombo25([c('C2'), c('D5')], 'S'));
+});
+
+console.log('牌型识别');
+test('单张 / 金鸡 / 25 / 甩牌', () => {
+  assert.equal(detectLead([c('HA')], 'S'), 'single');
+  assert.equal(detectLead([c('BJ'), c('LJ')], 'S'), 'joker');
+  assert.equal(detectLead([c('C2'), c('C5')], 'S'), 'combo25');
+  assert.equal(detectLead([c('HK'), c('HQ')], 'S'), 'throw');
+  assert.equal(detectLead([c('HK'), c('SQ')], 'S'), null);
+  assert.equal(detectLead([c('SA'), c('SK')], 'S'), null);
+});
+
+console.log('甩牌校验');
+test('甩出最大牌合法', () => {
+  const hands = [[c('HA'), c('HK')], [c('HQ')], [], []];
+  assert.ok(checkThrow([c('HA'), c('HK')], hands, [], 'S').ok);
+});
+test('外场有更大牌则非法，并返回最小一张', () => {
+  const hands = [[c('HK'), c('HQ')], [c('HA')], [], []];
+  const r = checkThrow([c('HK'), c('HQ')], hands, [], 'S');
+  assert.equal(r.ok, false);
+  assert.equal(r.forced.id, 'HQ');
+});
+test('自己剩余手牌也算外场', () => {
+  const hands = [[c('HK'), c('HA')], [], [], []];
+  assert.equal(checkThrow([c('HK')], hands, [], 'S').ok, false);
+});
+
+console.log('跟牌校验');
+test('单张副牌必须跟同花色', () => {
+  const hand = [c('H3'), c('SA')];
+  const lead = { seat: 0, cards: [c('HQ')], type: 'single' };
+  assert.ok(!validateFollow(hand, [c('SA')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('H3')], lead, 'S').ok);
+});
+test('单张主牌必须跟主', () => {
+  const hand = [c('H3'), c('S3')];
+  const lead = { seat: 0, cards: [c('C5')], type: 'single' };
+  assert.ok(!validateFollow(hand, [c('H3')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('S3')], lead, 'S').ok);
+});
+test('金鸡强制最大主牌', () => {
+  const hand = [c('S3'), c('BJ'), c('HA')];
+  const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
+  assert.ok(!validateFollow(hand, [c('S3')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('BJ')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('HA')], lead, 'S').ok === false);
+});
+test('无主牌时金鸡可垫任意牌', () => {
+  const hand = [c('H3'), c('D4')];
+  const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
+  assert.ok(validateFollow(hand, [c('H3')], lead, 'S').ok);
+});
+test('25 组合跟 2 张主牌', () => {
+  const hand = [c('H5'), c('S3'), c('H3')];
+  const lead = { seat: 0, cards: [c('C2'), c('C5')], type: 'combo25' };
+  assert.ok(!validateFollow(hand, [c('H5'), c('H3')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('H5'), c('S3')], lead, 'S').ok);
+});
+test('甩牌足额跟同花色', () => {
+  const hand = [c('H3'), c('H4'), c('D5'), c('SA')];
+  const lead = { seat: 0, cards: [c('HK'), c('HQ')], type: 'throw' };
+  assert.ok(!validateFollow(hand, [c('H3'), c('D5')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('H3'), c('H4')], lead, 'S').ok);
+});
+test('甩牌不足时可垫牌或全主杀', () => {
+  const hand = [c('H3'), c('D4'), c('S3'), c('S4')];
+  const lead = { seat: 0, cards: [c('HK'), c('HQ'), c('HJ')], type: 'throw' };
+  assert.ok(validateFollow(hand, [c('H3'), c('D4'), c('S3')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('S3'), c('S4'), c('D4')], lead, 'S').ok === false);
+});
+
+console.log('墩归属');
+test('单张：主牌杀牌获胜', () => {
+  const lead = { seat: 0, cards: [c('HA')], type: 'single' };
+  const plays = [
+    { seat: 0, cards: [c('HA')] },
+    { seat: 1, cards: [c('HK')] },
+    { seat: 2, cards: [c('S3')] },
+    { seat: 3, cards: [c('H3')] },
+  ];
+  assert.equal(resolveTrick(lead, plays, 'S'), 2);
+});
+test('单张：同花色最大者获胜', () => {
+  const lead = { seat: 0, cards: [c('H8')], type: 'single' };
+  const plays = [
+    { seat: 0, cards: [c('H8')] },
+    { seat: 1, cards: [c('HA')] },
+    { seat: 2, cards: [c('HK')] },
+    { seat: 3, cards: [c('D3')] },
+  ];
+  assert.equal(resolveTrick(lead, plays, 'S'), 1);
+});
+test('金鸡直接赢墩', () => {
+  const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
+  const plays = [
+    { seat: 0, cards: [c('BJ'), c('LJ')] },
+    { seat: 1, cards: [c('C5')] },
+    { seat: 2, cards: [c('S3')] },
+    { seat: 3, cards: [c('H3')] },
+  ];
+  assert.equal(resolveTrick(lead, plays, 'S'), 0);
+});
+test('25 组合之间同点数相等，25 压普通主牌，金鸡压 25', () => {
+  const lead = { seat: 0, cards: [c('C2'), c('C5')], type: 'combo25' };
+  const plays = [
+    { seat: 0, cards: [c('C2'), c('C5')] },
+    { seat: 1, cards: [c('H5'), c('S3')] },
+    { seat: 2, cards: [c('D2'), c('D5')] },
+    { seat: 3, cards: [c('BJ'), c('LJ')] },
+  ];
+  assert.equal(resolveTrick(lead, plays, 'S'), 3);
+  const plays2 = plays.slice(0, 3).concat([{ seat: 3, cards: [c('H3'), c('H4')] }]);
+  assert.equal(resolveTrick(lead, plays2, 'S'), 0);
+});
+test('甩牌：主牌杀牌后比最大主', () => {
+  const lead = { seat: 0, cards: [c('HA'), c('HK')], type: 'throw' };
+  const plays = [
+    { seat: 0, cards: [c('HA'), c('HK')] },
+    { seat: 1, cards: [c('H3'), c('D4')] },
+    { seat: 2, cards: [c('C5'), c('S3')] },
+    { seat: 3, cards: [c('D2'), c('S4')] },
+  ];
+  assert.equal(resolveTrick(lead, plays, 'S'), 2);
+});
+
+console.log('完整对局');
+function seatUsers(n) {
+  return Array.from({ length: n }, (_, i) => ({ id: `u${i}`, username: `p${i}`, nickname: `玩家${i}` }));
+}
+
+function newRoom(mode, n) {
+  const users = seatUsers(n);
+  const room = new Room({ id: 'T1', name: 'test', mode, maxSeats: n, hostId: 'u0' });
+  for (const u of users) room.addPlayer(u);
+  return room;
+}
+
+function autoPlayOut(room) {
+  let guard = 0;
+  while (room.state === 'playing') {
+    if (++guard > 2000) throw new Error('对局没有结束');
+    if (room.pendingResolveAt) {
+      room._resolveTrick(Date.now());
+      continue;
+    }
+    if (room.turn === null || room.turn === undefined) throw new Error('无出牌者');
+    const res = room._autoPlay(room.turn);
+    if (!res.ok) throw new Error(`自动出牌失败: ${res.error}`);
+  }
+}
+
+function declareFirst(room) {
+  for (let i = 0; i < room.maxSeats; i++) {
+    const two = room.seats[i].hand.find((x) => x.r === '2');
+    if (two) {
+      const r = room.declare(`u${i}`, [two.id]);
+      assert.ok(r.ok, r.error);
+      return;
+    }
+  }
+  throw new Error('无人有 2');
+}
+
+for (const mode of ['grab', 'team']) {
+  for (const n of mode === 'grab' ? [3, 4] : [4]) {
+    test(`${mode} ${n} 人完整自动对局`, () => {
+      const room = newRoom(mode, n);
+      const r = room.startRound('u0');
+      assert.ok(r.ok, r.error);
+      assert.ok(room.full);
+      declareFirst(room);
+      room._finalizeDeclaration();
+      assert.equal(room.state, 'burying');
+      room._autoBury();
+      assert.equal(room.state, 'playing');
+      autoPlayOut(room);
+      assert.equal(room.state, 'finished');
+      const res = room.result;
+      assert.ok(res);
+      const expected = 100 + res.bottomPoints * (res.bottomDoubled ? 2 : 1);
+      assert.equal(res.declarerPoints + res.defenderPoints, expected);
+      assert.ok(room.seats.every((s) => s.hand.length === 0));
+    });
+  }
+}
+
+test('噶点模式：全员过牌 + 叫分 + 扣底 + 对局', () => {
+  const room = newRoom('ga', 4);
+  room.startRound('u0');
+  assert.equal(room.state, 'bidding');
+  // 全部过牌 → 顺位候选以 55 分坐庄
+  for (let i = 0; i < 4; i++) {
+    const r = room.bid(`u${room.bidding.turn}`, 'pass');
+    assert.ok(r.ok, r.error);
+  }
+  assert.equal(room.state, 'burying');
+  assert.equal(room.bidValue, 55);
+  assert.equal(room.declarerSeat, 0);
+  room.bury(`u0`, 'H', room.seats[0].hand.slice(0, 6).map((x) => x.id));
+  assert.equal(room.state, 'playing');
+  assert.equal(room.trumpSuit, 'H');
+  autoPlayOut(room);
+  assert.equal(room.state, 'finished');
+  assert.ok(room.result);
+});
+
+test('噶点叫分必须 5 的倍数且递增', () => {
+  const room = newRoom('ga', 4);
+  room.startRound('u0');
+  const first = room.bidding.turn;
+  assert.ok(!room.bid(`u${first}`, 57).ok);
+  assert.ok(room.bid(`u${first}`, 60).ok);
+  const next = room.bidding.turn;
+  assert.ok(!room.bid(`u${next}`, 60).ok);
+  assert.ok(room.bid(`u${next}`, 65).ok);
+});
+
+console.log(`\n通过 ${passed} 项测试`);
+if (process.exitCode) process.exit(process.exitCode);
