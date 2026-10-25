@@ -109,6 +109,7 @@ function cardHTML(card, opts = {}) {
   const isJoker = card.s === 'J';
   const isRed = card.s === 'H' || card.s === 'D' || card.r === 'BJ';
   const trump = opts.trumpSuit ? isTrumpC(card, opts.trumpSuit) : false;
+  const deal = opts.dealDelay != null;
   const classes = [
     'card',
     opts.mini ? 'mini' : '',
@@ -118,16 +119,18 @@ function cardHTML(card, opts = {}) {
     trump && !opts.mini ? 'trump' : '',
     opts.selected ? 'selected' : '',
     opts.back ? 'back' : '',
+    deal ? 'deal-in' : '',
   ]
     .filter(Boolean)
     .join(' ');
+  const style = deal ? `style="animation-delay:${opts.dealDelay}ms"` : '';
   if (opts.back) return `<div class="card mini back"></div>`;
   if (isJoker) {
-    return `<div class="${classes}" data-id="${card.id}"><span class="joker-text">${card.r === 'BJ' ? '大王' : '小王'}</span></div>`;
+    return `<div class="${classes}" data-id="${card.id}" ${style}><span class="joker-text">${card.r === 'BJ' ? '大王' : '小王'}</span></div>`;
   }
   const sym = SUIT_SYM[card.s];
   const pts = cardPoints(card);
-  return `<div class="${classes}" data-id="${card.id}">
+  return `<div class="${classes}" data-id="${card.id}" ${style}>
     <span class="rank">${esc(card.r)}</span>
     <span class="suit">${sym}</span>
     <span class="big-suit">${sym}</span>
@@ -277,20 +280,34 @@ function onRoom(room) {
   if (!room) {
     state.room = null;
     state.selected.clear();
+    state.dealing = false;
+    state.trickAnimKey = null;
     render();
     return;
   }
   const prev = state.room;
+  const prevHandCount = prev ? (prev.hand || []).length : 0;
   state.room = room;
   const handIds = new Set((room.hand || []).map((c) => c.id));
   for (const id of [...state.selected]) {
     if (!handIds.has(id)) state.selected.delete(id);
   }
-  if (!prev || prev.id !== room.id || prev.roundNo !== room.roundNo) {
+  const roundChanged = !prev || prev.id !== room.id || prev.roundNo !== room.roundNo;
+  if (roundChanged) {
     state.selected.clear();
     state.resultKey = null;
     state.resultOpen = false;
     state.burySuit = null;
+    state.trickAnimKey = null;
+  }
+  // 新一局发牌：手牌从 0 变为非空时触发发牌动画（约 1 秒完成）
+  if (prevHandCount === 0 && (room.hand || []).length > 0) {
+    state.dealing = true;
+    clearTimeout(state._dealTimer);
+    state._dealTimer = setTimeout(() => {
+      state.dealing = false;
+      if (state.room) renderHand();
+    }, 1100);
   }
   if (room.state !== 'burying') state.burySuit = null;
   if (room.state === 'burying' && room.mySeat >= 0 && room.mySeat === room.declarerSeat && !state.burySuit) {
@@ -523,6 +540,16 @@ function centerHTML() {
   const current = r.trick && r.trick.plays && r.trick.plays.length ? r.trick.plays : null;
   const last = !current && r.lastTrick ? r.lastTrick : null;
   const plays = current || (last ? last.plays : []);
+
+  // 出牌动画：只对本墩中新出现的出牌组做飞入动画
+  if (!state.animatedPlays) state.animatedPlays = new Set();
+  const leadSig = current && r.trick.lead
+    ? `${r.roundNo}:${r.trick.lead.seat}:${(r.trick.lead.cards || []).map((c) => c.id).join(',')}`
+    : null;
+  if (state._trickLeadSig !== leadSig) {
+    state._trickLeadSig = leadSig;
+    state.animatedPlays.clear();
+  }
   let groups = '';
   if (plays.length) {
     groups = plays
@@ -530,7 +557,12 @@ function centerHTML() {
         const win = last && last.winner === p.seat;
         const cards = p.cards.map((c) => cardHTML(c, { mini: true, trumpSuit: r.trumpSuit })).join('');
         const leadMark = r.trick && r.trick.lead && r.trick.lead.seat === p.seat && current ? ' · 首出' : '';
-        return `<div class="play-group">
+        const pkey = `${p.seat}:${p.cards.map((c) => c.id).join(',')}`;
+        const isNew = current && !state.animatedPlays.has(pkey);
+        if (isNew) state.animatedPlays.add(pkey);
+        const pos = posFor(p.seat);
+        const animCls = isNew ? `fly from-${pos}` : '';
+        return `<div class="play-group ${animCls}">
           <div class="play-cards">${cards}</div>
           <div class="play-name ${win ? 'winner' : ''}">${esc(seatName(p.seat))}${win ? ' ✓' : leadMark}</div>
         </div>`;
@@ -538,6 +570,18 @@ function centerHTML() {
       .join('');
   } else {
     groups = `<div class="phase-desc" style="opacity:.55">等待出牌…</div>`;
+  }
+
+  // 主花色醒目展示
+  let trumpBadge = '';
+  if (r.trumpSuit) {
+    const red = r.trumpSuit === 'H' || r.trumpSuit === 'D';
+    trumpBadge = `<div class="trump-indicator ${red ? 'red' : ''}" title="本局主花色">
+      <span class="ti-sym">${SUIT_SYM[r.trumpSuit]}</span>
+      <span>主 · ${SUIT_NAME[r.trumpSuit]}</span>
+    </div>`;
+  } else if (r.state === 'declaring') {
+    trumpBadge = `<div class="trump-indicator" style="opacity:.55"><span class="ti-sym">?</span><span>主花色未定</span></div>`;
   }
 
   let foot = '';
@@ -554,7 +598,8 @@ function centerHTML() {
     foot = `${r.result.detail}`;
   }
 
-  return `<div class="center-status">${status}</div>
+  return `${trumpBadge}
+    <div class="center-status">${status}</div>
     <div class="trick-zone">${groups}</div>
     <div class="center-foot">${foot}</div>`;
 }
@@ -750,6 +795,10 @@ function canSelectCards() {
   return false;
 }
 
+function handTotalPoints(hand) {
+  return (hand || []).reduce((n, c) => n + cardPoints(c), 0);
+}
+
 function renderHand() {
   const r = state.room;
   if (!r) return;
@@ -759,16 +808,30 @@ function renderHand() {
   if (me) {
     metaBits.push(`<span class="chip">我 · ${hand.length} 张</span>`);
     metaBits.push(`<span class="chip gold">已得 ${me.captured} 分</span>`);
+    metaBits.push(`<span class="chip">手牌 ${handTotalPoints(hand)} 分</span>`);
     metaBits.push(`<span class="chip">${roleLabel(me)}</span>`);
     if (!me.connected) metaBits.push(`<span class="chip red">托管中</span>`);
+  }
+  // 扣底阶段：说明选中的底牌分数不会丢失，结算时计入（庄家赢最后一墩则归庄家，否则翻倍归抓分方）
+  if (r.state === 'burying' && r.mySeat === r.declarerSeat) {
+    const sel = selectedCards();
+    const bottomPts = handTotalPoints(sel);
+    metaBits.push(
+      `<span class="chip gold">底牌 ${bottomPts} 分（不扣分，结算计入）</span>`,
+    );
   }
   if (r.state === 'playing') {
     metaBits.push(`<span class="chip">${r.turn === r.mySeat ? '轮到你' : `等待 ${esc(seatName(r.turn))}`}</span>`);
   }
   $('#hand-meta').innerHTML = metaBits.join('');
 
+  const dealing = !!state.dealing;
   const handHTML = hand
-    .map((c) => cardHTML(c, { trumpSuit: r.trumpSuit, selected: state.selected.has(c.id) }))
+    .map((c, i) => {
+      const opts = { trumpSuit: r.trumpSuit, selected: state.selected.has(c.id) };
+      if (dealing) opts.dealDelay = i * 60; // 每张间隔 60ms，16 张约 1 秒
+      return cardHTML(c, opts);
+    })
     .join('');
   $('#hand').innerHTML = handHTML || `<span class="muted" style="font-size:12px">暂无手牌</span>`;
 
