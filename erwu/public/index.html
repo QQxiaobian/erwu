@@ -64,6 +64,7 @@
       <span class="user-tag hidden" id="lobby-admin-tag">管理员</span>
     </div>
     <div class="top-actions">
+      <button class="btn ghost small" id="open-audio-btn">声音</button>
       <button class="btn ghost small" id="open-rules-btn">规则</button>
       <button class="btn ghost small hidden" id="open-admin-btn">管理</button>
       <button class="btn ghost small" id="logout-btn">退出</button>
@@ -119,6 +120,7 @@
     <div class="room-meta" id="room-meta"></div>
     <div class="turn-timer" id="turn-timer"></div>
     <button class="btn ghost small hidden" id="card-counter-btn">记牌</button>
+    <button class="btn ghost small" id="table-audio-btn">声音</button>
     <button class="btn ghost small" id="table-rules-btn">规则</button>
   </header>
 
@@ -228,6 +230,40 @@
   </div>
 </div>
 
+<!-- ================= 声音设置 ================= -->
+<div class="overlay hidden" id="audio-overlay">
+  <div class="modal audio-modal">
+    <div class="modal-head">
+      <h2>声音设置</h2>
+      <button class="icon-btn" data-close="audio-overlay">×</button>
+    </div>
+    <div class="settings-list">
+      <div class="setting-row">
+        <div>
+          <div class="setting-title">背景音乐</div>
+          <div class="setting-desc">轻柔的五声音阶牌桌旋律，循环播放</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="music-switch" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-title">游戏音效</div>
+          <div class="setting-desc">发牌、出牌、亮主、轮到你、赢墩、结算</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="sfx-switch" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    <p class="muted audio-tip">音乐与音效开关只保存在当前设备浏览器中。</p>
+  </div>
+</div>
+
+<script src="/audio.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

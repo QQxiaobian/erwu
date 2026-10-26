@@ -78,6 +78,7 @@ function toast(text, type = '') {
   el.className = `toast ${type}`;
   el.textContent = text;
   wrap.appendChild(el);
+  if (type === 'error' && window.GameAudio) window.GameAudio.sfx('error');
   setTimeout(() => {
     el.style.opacity = '0';
     el.style.transition = 'opacity .25s';
@@ -356,6 +357,7 @@ function onRoom(room) {
   // 新一局发牌：手牌从 0 变为非空时触发发牌动画（约 1 秒完成）
   if (prevHandCount === 0 && (room.hand || []).length > 0) {
     state.dealing = true;
+    if (window.GameAudio) window.GameAudio.sfx('deal');
     clearTimeout(state._dealTimer);
     state._dealTimer = setTimeout(() => {
       state.dealing = false;
@@ -374,7 +376,40 @@ function onRoom(room) {
     }
   }
   if (room.state !== 'finished') state.resultOpen = false;
+  playRoomSounds(prev, room);
   render();
+}
+
+// 根据前后两帧房间状态播放牌局音效
+function playRoomSounds(prev, room) {
+  const A = window.GameAudio;
+  if (!A || !prev || prev.id !== room.id || prev.roundNo !== room.roundNo) return;
+  const mySeat = room.mySeat;
+  // 有人出牌
+  const prevPlays = (prev.trick && prev.trick.plays) || [];
+  const nowPlays = (room.trick && room.trick.plays) || [];
+  if (nowPlays.length > prevPlays.length) A.sfx('play');
+  // 一墩结束
+  if (prev.lastTrick && (!room.lastTrick || prev.lastTrick.at !== room.lastTrick.at)) {
+    A.sfx('trick');
+    const won = room.lastTrick && room.lastTrick.winner === mySeat;
+    setTimeout(() => A.sfx(won ? 'win' : 'lose'), 200);
+  }
+  // 轮到我了
+  if (room.state === 'playing' && room.turn === mySeat && prev.turn !== mySeat) A.sfx('turn');
+  // 亮主 / 反主
+  const prevDecl = prev.declaration && prev.declaration.last;
+  const nowDecl = room.declaration && room.declaration.last;
+  if (nowDecl && (!prevDecl || prevDecl.seat !== nowDecl.seat || prevDecl.suit !== nowDecl.suit)) {
+    A.sfx('declare');
+  }
+  // 叫分
+  if (room.state === 'bidding' && (room.bidValue || 0) > (prev.bidValue || 0)) A.sfx('bid');
+  // 本局结算
+  if (room.state === 'finished' && prev.state !== 'finished' && room.result) {
+    const wins = (room.result.sides || []).some((s) => s.won && s.seats.includes(mySeat));
+    setTimeout(() => A.sfx(wins ? 'win' : 'lose'), 320);
+  }
 }
 
 function bestSuit(hand) {
@@ -1430,6 +1465,15 @@ function tickTimers() {
 }
 
 /* ---------------- 绑定 ---------------- */
+// 打开声音设置面板，用当前开关状态初始化
+function openAudioPanel() {
+  const A = window.GameAudio;
+  if (!A) return;
+  $('#music-switch').checked = A.musicOn;
+  $('#sfx-switch').checked = A.sfxOn;
+  $('#audio-overlay').classList.remove('hidden');
+}
+
 function bind() {
   $$('.auth-tab').forEach((btn) => btn.addEventListener('click', () => setAuthTab(btn.dataset.tab)));
   $('#login-form').addEventListener('submit', doLogin);
@@ -1444,6 +1488,24 @@ function bind() {
   });
   $('#open-admin-btn').addEventListener('click', openAdmin);
   $('#table-leave').addEventListener('click', () => handleAction('leave'));
+
+  // 声音设置
+  for (const sel of ['#open-audio-btn', '#table-audio-btn']) {
+    const btn = $(sel);
+    if (btn) btn.addEventListener('click', openAudioPanel);
+  }
+  const musicSwitch = $('#music-switch');
+  if (musicSwitch) {
+    musicSwitch.addEventListener('change', () => {
+      if (window.GameAudio) musicSwitch.checked = window.GameAudio.setMusic(musicSwitch.checked);
+    });
+  }
+  const sfxSwitch = $('#sfx-switch');
+  if (sfxSwitch) {
+    sfxSwitch.addEventListener('change', () => {
+      if (window.GameAudio) sfxSwitch.checked = window.GameAudio.setSfx(sfxSwitch.checked);
+    });
+  }
 
   $('#create-mode').addEventListener('change', () => {
     const mode = $('#create-mode').value;
@@ -1475,6 +1537,7 @@ function bind() {
   });
 
   document.addEventListener('click', (e) => {
+    if (e.target.closest('button') && window.GameAudio) window.GameAudio.sfx('click');
     const closeBtn = e.target.closest('[data-close]');
     if (closeBtn) {
       $('#' + closeBtn.dataset.close).classList.add('hidden');

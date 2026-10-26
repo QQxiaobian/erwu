@@ -1470,3 +1470,14 @@ button, input, select { font: inherit; }
   .cc-tile .cc-rank { font-size: 11px; }
   .cc-tile .cc-sym { font-size: 9px; }
 }
+
+/* 声音设置 */
+.audio-modal { width: min(460px, 100%); }
+.audio-tip { margin-top: 12px; font-size: 12px; }
+
+/* 窄屏牌桌顶栏：压缩按钮，避免「记牌 / 声音 / 规则」被挤出屏幕 */
+@media (max-width: 560px) {
+  .table-topbar { gap: 5px; padding: 0 8px; }
+  .table-topbar .btn.small { padding: 4px 7px; font-size: 11px; }
+  #room-name { max-width: 84px; }
+}
