@@ -106,11 +106,28 @@ export class Room {
     return this.seats.findIndex((s) => s && s.userId === userId);
   }
 
+  // 房间成员：牌局中主动离开的座位仍留在桌上托管，但不再算作房间成员
+  hasMember(userId) {
+    const idx = this.seatOf(userId);
+    return idx >= 0 && !this.seats[idx].detached;
+  }
+
   addPlayer(user) {
+    const existing = this.seatOf(user.id);
+    if (existing >= 0) {
+      const seat = this.seats[existing];
+      if (seat.detached && this.state !== 'waiting' && this.state !== 'finished') {
+        seat.detached = false;
+        seat.connected = true;
+        this._log(`${seat.name} 重新回到牌桌`, 'join');
+        this._touch();
+        return { ok: true, seat: existing };
+      }
+      return { ok: true };
+    }
     if (this.state !== 'waiting' && this.state !== 'finished') {
       return { ok: false, error: '牌局已开始，无法加入' };
     }
-    if (this.seatOf(user.id) >= 0) return { ok: true };
     const idx = this.seats.indexOf(null);
     if (idx < 0) return { ok: false, error: '房间已满' };
     const name = user.nickname || user.username;
@@ -180,11 +197,12 @@ export class Room {
       this._touch();
     } else {
       seat.connected = false;
+      seat.detached = true;
       if (this.hostId === userId) {
-        const next = this.seats.find((s) => s && s.connected && !s.isBot);
+        const next = this.seats.find((s) => s && s.connected && !s.isBot && !s.detached);
         if (next) this.hostId = next.userId;
       }
-      this._log(`${seat.name} 断线，进入托管`, 'warn');
+      this._log(`${seat.name} 离开牌局，进入托管`, 'warn');
     }
     return { ok: true };
   }
@@ -193,6 +211,7 @@ export class Room {
     const idx = this.seatOf(userId);
     if (idx < 0) return;
     const seat = this.seats[idx];
+    if (seat.detached) return;
     if (seat.connected === connected) return;
     seat.connected = connected;
     if (this.state !== 'finished') {
@@ -240,6 +259,14 @@ export class Room {
       if (!hostGone) return { ok: false, error: '只有房主可以开始牌局' };
     }
     if (this.state !== 'waiting' && this.state !== 'finished') return { ok: false, error: '当前不能开始新一局' };
+    // 上一局中途离开的玩家不再占用座位
+    if (this.seats.some((s) => s && s.detached)) {
+      this.seats = this.seats.map((s) => (s && s.detached ? null : s));
+      if (this.hostId && this.seatOf(this.hostId) < 0) {
+        const next = this.seats.find((s) => s && !s.isBot);
+        this.hostId = next ? next.userId : null;
+      }
+    }
     if (!this.full) return { ok: false, error: '座位还没有坐满' };
 
     this.roundNo++;

@@ -351,6 +351,42 @@ test('房主离开时房主身份不会转给人机', () => {
   assert.ok(room.seats.every((s) => !s));
 });
 
+test('牌局中离开会退出房间并由系统托管', () => {
+  const room = newRoom('grab', 3);
+  assert.ok(room.startRound('u0').ok);
+  declareFirst(room);
+  room._finalizeDeclaration();
+  room._autoBury();
+  assert.equal(room.state, 'playing');
+  assert.ok(room.leave('u1').ok);
+  // 离开后不再是房间成员，应能回到大厅
+  assert.equal(room.hasMember('u1'), false);
+  // 座位仍在桌上，牌局继续且自动托管
+  assert.ok(room.seats[1]);
+  assert.ok(room.seats[1].detached);
+  autoPlayOut(room);
+  assert.equal(room.state, 'finished');
+  // 中途离开的座位占位会在下一局开始时清理
+  assert.equal(room.startRound('u0').ok, false);
+  assert.equal(room.seats[1], null);
+});
+
+test('牌局中离开后可以重新回到原座位', () => {
+  const room = newRoom('grab', 3);
+  assert.ok(room.startRound('u0').ok);
+  declareFirst(room);
+  room._finalizeDeclaration();
+  room._autoBury();
+  room.leave('u1');
+  assert.equal(room.hasMember('u1'), false);
+  const res = room.addPlayer(seatUsers(3)[1]);
+  assert.ok(res.ok, res.error);
+  assert.equal(res.seat, 1);
+  assert.equal(room.hasMember('u1'), true);
+  assert.equal(room.seats[1].detached, false);
+  assert.ok(room.seats[1].connected);
+});
+
 function addBotOk(room) {
   assert.ok(room.addBot('u0').ok);
 }

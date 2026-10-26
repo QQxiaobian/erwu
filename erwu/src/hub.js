@@ -102,7 +102,7 @@ export class Hub {
 
   roomOfUser(userId) {
     for (const room of this.rooms.values()) {
-      if (room.seatOf(userId) >= 0) return room;
+      if (room.hasMember(userId)) return room;
     }
     return null;
   }
@@ -120,10 +120,10 @@ export class Hub {
         mode: r.mode,
         modeName: MODE_INFO[r.mode].name,
         maxSeats: r.maxSeats,
-        count: r.seats.filter(Boolean).length,
+        count: r.seats.filter((s) => s && !s.detached).length,
         state: r.state,
         hostName: (r.seats.find((s) => s && s.userId === r.hostId) || {}).name || '-',
-        players: r.seats.filter(Boolean).map((s) => s.name),
+        players: r.seats.filter((s) => s && !s.detached).map((s) => s.name),
         roundNo: r.roundNo,
       }));
   }
@@ -137,7 +137,7 @@ export class Hub {
 
   broadcastRoom(room) {
     for (const seat of room.seats) {
-      if (!seat) continue;
+      if (!seat || seat.detached) continue;
       this.sendToUser(seat.userId, { t: 'room', room: room.viewFor(seat.userId) });
     }
   }
@@ -203,10 +203,12 @@ export class Hub {
 
     if (t === 'room.leave') {
       const room = this.roomOfUser(user.id);
-      if (!room) return;
+      if (!room) return this.send(ws, { t: 'left' });
       room.leave(user.id);
       this.send(ws, { t: 'left' });
-      if (room.seats.every((s) => !s)) {
+      // 没有真人成员时回收房间，避免托管中的僵尸房间
+      const hasHuman = room.seats.some((s) => s && !s.isBot && !s.detached);
+      if (!hasHuman) {
         this.rooms.delete(room.id);
       } else {
         this.broadcastRoom(room);
