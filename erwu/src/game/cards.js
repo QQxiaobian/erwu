@@ -335,21 +335,27 @@ export function isPermanentTrump(card) {
   return card.s === 'J' || card.r === '5' || card.r === '2';
 }
 
-// 通用花色整理（不依赖主花色，用于噶点发牌后）：先按花色分组，花色内按点数从大到小
-// 花色顺序：黑桃→红桃→梅花→方块，大小王单独放最前，然后是 5 和 2
+// 通用花色整理（不依赖主花色，用于噶点发牌后）：先把常主（5/2/王）提到最前，再按花色分组
 export function sortBySuit(cards) {
   const suitOrder = { J: 0, S: 1, H: 2, C: 3, D: 4 };
   return cards.slice().sort((a, b) => {
-    const sa = suitOrder[a.s] ?? 5;
-    const sb = suitOrder[b.s] ?? 5;
-    if (sa !== sb) return sa - sb;
-    // 花色内按点数从大到小（A 最大，3 最小；5 和 2 在该花色里仍保持自然顺序）
-    const rankIdxA = RANKS.indexOf(a.r);
-    const rankIdxB = RANKS.indexOf(b.r);
-    if (rankIdxA === -1 && rankIdxB === -1) return 0;
-    if (rankIdxA === -1) return -1; // 5/2 排在前面
-    if (rankIdxB === -1) return 1;
-    return rankIdxB - rankIdxA;
+    const isTrumpA = a.s === 'J' || a.r === '5' || a.r === '2';
+    const isTrumpB = b.s === 'J' || b.r === '5' || b.r === '2';
+    // 常主全部排在普通牌之前
+    if (isTrumpA !== isTrumpB) return isTrumpA ? -1 : 1;
+    if (!isTrumpA && !isTrumpB) {
+      // 普通牌：先按花色分组，再按点数从大到小
+      const sa = suitOrder[a.s] ?? 5;
+      const sb = suitOrder[b.s] ?? 5;
+      if (sa !== sb) return sa - sb;
+      return RANKS.indexOf(b.r) - RANKS.indexOf(a.r);
+    }
+    // 同为常主：王 > 5 > 2；同点数按花色 S/H/C/D 排
+    const rankGroup = (c) => (c.s === 'J' ? 0 : c.r === '5' ? 1 : 2);
+    const ga = rankGroup(a);
+    const gb = rankGroup(b);
+    if (ga !== gb) return ga - gb;
+    return (suitOrder[a.s] ?? 5) - (suitOrder[b.s] ?? 5);
   });
 }
 
