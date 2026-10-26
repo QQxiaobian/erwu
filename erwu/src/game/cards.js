@@ -146,12 +146,20 @@ export function validateFollow(hand, played, lead, trumpSuit) {
   }
 
   if (type === 'joker') {
-    if (played.length !== 1) return err('金鸡首出，每人只跟 1 张牌');
-    if (trumps.length > 0) {
-      const maxPower = Math.max(...trumps.map((c) => power(c, trumpSuit)));
-      if (power(played[0], trumpSuit) !== maxPower || !isTrump(played[0], trumpSuit)) {
-        return err('金鸡强制跟牌：必须打出自己手里最大的一张主牌');
+    if (played.length !== 2) return err('金鸡首出，每人必须跟 2 张牌');
+    if (trumps.length >= 2) {
+      const need = trumps.map((c) => power(c, trumpSuit)).sort((a, b) => b - a);
+      const got = played.map((c) => power(c, trumpSuit)).sort((a, b) => b - a);
+      if (!played.every((c) => isTrump(c, trumpSuit)) || got[1] < need[1]) {
+        return err('金鸡强制跟牌：必须打出自己手里最大的两张主牌');
       }
+      return { ok: true };
+    }
+    if (trumps.length === 1) {
+      if (!played.some((c) => isTrump(c, trumpSuit))) {
+        return err('金鸡强制跟牌：必须带出仅有的一张主牌');
+      }
+      return { ok: true };
     }
     return { ok: true };
   }
@@ -350,8 +358,10 @@ export function autoSelect(hand, lead, trumpSuit) {
   }
 
   if (lead.type === 'joker') {
-    if (trumps.length) return [trumps[trumps.length - 1]];
-    return [nonTrumps[0] || hand[0]];
+    // 金鸡强制跟 2 张：有 2 张以上主牌出最大的两张，只有 1 张主牌则带出这张主牌
+    if (trumps.length >= 2) return trumps.slice(-2);
+    if (trumps.length === 1) return [trumps[0], nonTrumps[0] || hand[0]];
+    return nonTrumps.length >= 2 ? nonTrumps.slice(0, 2) : hand.slice(0, 2);
   }
 
   if (lead.type === 'single') {

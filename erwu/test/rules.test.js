@@ -100,17 +100,34 @@ test('单张主牌必须跟主', () => {
   assert.ok(!validateFollow(hand, [c('H3')], lead, 'S').ok);
   assert.ok(validateFollow(hand, [c('S3')], lead, 'S').ok);
 });
-test('金鸡强制最大主牌', () => {
-  const hand = [c('S3'), c('BJ'), c('HA')];
+test('金鸡强制跟最大的两张主牌', () => {
+  const hand = [c('S3'), c('S4'), c('BJ'), c('HA')];
   const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
-  assert.ok(!validateFollow(hand, [c('S3')], lead, 'S').ok);
-  assert.ok(validateFollow(hand, [c('BJ')], lead, 'S').ok);
-  assert.ok(validateFollow(hand, [c('HA')], lead, 'S').ok === false);
+  assert.ok(!validateFollow(hand, [c('BJ')], lead, 'S').ok);
+  assert.ok(!validateFollow(hand, [c('HA'), c('S3')], lead, 'S').ok);
+  assert.ok(!validateFollow(hand, [c('S3'), c('S4')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('BJ'), c('S4')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('S4'), c('BJ')], lead, 'S').ok);
 });
-test('无主牌时金鸡可垫任意牌', () => {
+test('金鸡时只有 1 张主牌则带出该主牌', () => {
+  const hand = [c('S3'), c('HA'), c('D4')];
+  const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
+  assert.ok(!validateFollow(hand, [c('HA'), c('D4')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('S3'), c('HA')], lead, 'S').ok);
+});
+test('无主牌时金鸡可垫任意两张牌', () => {
   const hand = [c('H3'), c('D4')];
   const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
-  assert.ok(validateFollow(hand, [c('H3')], lead, 'S').ok);
+  assert.ok(validateFollow(hand, [c('H3'), c('D4')], lead, 'S').ok);
+  assert.ok(!validateFollow(hand, [c('H3')], lead, 'S').ok);
+});
+test('托管金鸡跟牌选最大两张主牌', () => {
+  const hand = [c('S3'), c('S4'), c('BJ'), c('HA')];
+  const lead = { seat: 0, cards: [c('BJ'), c('LJ')], type: 'joker' };
+  const picked = autoSelect(hand, lead, 'S');
+  assert.equal(picked.length, 2);
+  assert.deepEqual(new Set(picked.map((x) => x.id)), new Set(['BJ', 'S4']));
+  assert.ok(validateFollow(hand, picked, lead, 'S').ok);
 });
 test('25 组合跟 2 张主牌', () => {
   const hand = [c('H5'), c('S3'), c('H3')];
