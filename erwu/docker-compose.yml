@@ -1,6 +1,7 @@
 services:
   erwu:
-    build: .
+    # 直接从 GitHub 仓库构建，无需手动 clone
+    build: https://github.com/QQxiaobian/erwu.git#main:erwu
     container_name: erwu
     restart: unless-stopped
     ports:

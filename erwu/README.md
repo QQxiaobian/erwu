@@ -15,18 +15,28 @@
 
 ### 方式一：Docker Compose（推荐 NAS 使用）
 
-直接从 GitHub 拉取代码并启动：
+**最简单：只需一个 docker-compose.yml 文件**
+
+下载仓库里的 `docker-compose.yml` 到任意目录，然后直接启动（会自动从 GitHub 拉取源码构建，无需手动 clone）：
+
+```bash
+# 下载 compose 文件
+curl -O https://raw.githubusercontent.com/QQxiaobian/erwu/main/erwu/docker-compose.yml
+# 可选：自定义初始管理员密码
+ADMIN_PASSWORD='换成你的密码' docker compose up -d
+```
+
+也可以克隆仓库后构建：
 
 ```bash
 git clone https://github.com/QQxiaobian/erwu.git
 cd erwu/erwu
-# 可选：自定义初始管理员密码
 ADMIN_PASSWORD='换成你的密码' docker compose up -d --build
 ```
 
 服务监听 `3000` 端口，浏览器访问 `http://NAS_IP:3000`。
 
-数据目录挂载在 `./data`，升级只需 `git pull` 后重新 `docker compose up -d --build`，账号与对局记录保留。
+数据目录挂载在 `./data`，升级只需重新 `docker compose up -d --build` 即可拉取最新代码，账号与对局记录保留。
 
 > 若群晖等图形界面使用容器管理器，可导入仓库后用「docker-compose.yml」直接创建容器。
 
