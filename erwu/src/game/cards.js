@@ -335,6 +335,24 @@ export function isPermanentTrump(card) {
   return card.s === 'J' || card.r === '5' || card.r === '2';
 }
 
+// 通用花色整理（不依赖主花色，用于噶点发牌后）：先按花色分组，花色内按点数从大到小
+// 花色顺序：黑桃→红桃→梅花→方块，大小王单独放最前，然后是 5 和 2
+export function sortBySuit(cards) {
+  const suitOrder = { J: 0, S: 1, H: 2, C: 3, D: 4 };
+  return cards.slice().sort((a, b) => {
+    const sa = suitOrder[a.s] ?? 5;
+    const sb = suitOrder[b.s] ?? 5;
+    if (sa !== sb) return sa - sb;
+    // 花色内按点数从大到小（A 最大，3 最小；5 和 2 在该花色里仍保持自然顺序）
+    const rankIdxA = RANKS.indexOf(a.r);
+    const rankIdxB = RANKS.indexOf(b.r);
+    if (rankIdxA === -1 && rankIdxB === -1) return 0;
+    if (rankIdxA === -1) return -1; // 5/2 排在前面
+    if (rankIdxB === -1) return 1;
+    return rankIdxB - rankIdxA;
+  });
+}
+
 export function sortHand(cards, trumpSuit) {
   return cards.slice().sort((a, b) => {
     // 分组：0=常主(5/2/王) 永远最左；1=主花色普通牌；2=副牌

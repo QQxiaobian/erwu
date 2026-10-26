@@ -6,6 +6,7 @@ import {
   isTrump,
   power,
   sortHand,
+  sortBySuit,
   cardPoints,
   handPoints,
   isCombo25,
@@ -263,6 +264,8 @@ export class Room {
     let cursor = 0;
     for (const seat of this.seats) {
       seat.hand = deck.slice(cursor, cursor + per);
+      // 噶点模式发牌后立即按花色整理（尚未定主花色）
+      if (this.mode === 'ga') seat.hand = sortBySuit(seat.hand);
       cursor += per;
       seat.captured = 0;
     }
@@ -492,6 +495,14 @@ export class Room {
   _finishBidding() {
     const b = this.bidding;
     if (!b) return { ok: false, error: '叫分状态异常' };
+    // 全部过牌无人叫分：重发牌重新叫（最多 2 次）
+    if (b.highestBidder === null && this.redeals < 2) {
+      this.redeals++;
+      this._deal();
+      this._initBidding();
+      this._log('叫分全部过牌，重新发牌', 'warn');
+      return { ok: true };
+    }
     const declarer = b.highestBidder !== null ? b.highestBidder : b.candidate;
     this.declarerSeat = declarer;
     this.bidValue = b.highestBidder !== null ? b.currentBid : 55;

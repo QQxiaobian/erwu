@@ -274,16 +274,30 @@ for (const mode of ['grab', 'team']) {
   }
 }
 
-test('噶点模式：全员过牌 + 叫分 + 扣底 + 对局', () => {
+test('噶点模式：全员过牌重发两次 + 第三次保底', () => {
   const room = newRoom('ga', 4);
   room.startRound('u0');
   assert.equal(room.state, 'bidding');
-  // 全部过牌 → 顺位候选以 55 分坐庄
+  // 重发第一次全员过
   for (let i = 0; i < 4; i++) {
     const r = room.bid(`u${room.bidding.turn}`, 'pass');
     assert.ok(r.ok, r.error);
   }
-  assert.equal(room.state, 'burying');
+  assert.equal(room.state, 'bidding', '第一次全员过应重发重新叫分');
+  assert.equal(room.redeals, 1);
+  // 重发第二次全员过
+  for (let i = 0; i < 4; i++) {
+    const r = room.bid(`u${room.bidding.turn}`, 'pass');
+    assert.ok(r.ok, r.error);
+  }
+  assert.equal(room.state, 'bidding', '第二次全员过仍应重发');
+  assert.equal(room.redeals, 2);
+  // 第三次全员过 → 达到上限，候选以 55 分保底坐庄
+  for (let i = 0; i < 4; i++) {
+    const r = room.bid(`u${room.bidding.turn}`, 'pass');
+    assert.ok(r.ok, r.error);
+  }
+  assert.equal(room.state, 'burying', '第三次全员过应保底坐庄');
   assert.equal(room.bidValue, 55);
   assert.equal(room.declarerSeat, 0);
   room.bury(`u0`, 'H', room.seats[0].hand.slice(0, 6).map((x) => x.id));
