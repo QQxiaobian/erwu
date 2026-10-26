@@ -380,15 +380,67 @@ function onRoom(room) {
   render();
 }
 
+// 牌面 → 中文播报词
+const RANK_SAY = {
+  A: 'A',
+  K: 'K',
+  Q: 'Q',
+  J: 'J',
+  10: '10',
+  9: '9',
+  8: '8',
+  7: '7',
+  6: '6',
+  5: '5',
+  4: '4',
+  3: '3',
+  2: '2',
+};
+function cardSpeech(card) {
+  if (!card) return '';
+  if (card.s === 'J') return card.r === 'BJ' ? '大王' : '小王';
+  return `${SUIT_NAME[card.s]}${RANK_SAY[card.r] || card.r}`;
+}
+
+// 一次出牌要播报的内容：单张念点数，多张念牌型，全主牌跟副牌念「毙」
+function playSpeech(cards, lead, trumpSuit) {
+  if (!cards || !cards.length) return '';
+  const isJokerPair = cards.length === 2 && cards.some((c) => c.r === 'BJ') && cards.some((c) => c.r === 'SJ');
+  if (isJokerPair) return '金鸡';
+  const isPair25 =
+    cards.length === 2 &&
+    cards[0].s === cards[1].s &&
+    [cards[0].r, cards[1].r].sort().join('') === '25';
+  if (isPair25) return '二五';
+  const allTrump = cards.every((c) => isTrumpC(c, trumpSuit));
+  if (!lead) {
+    if (cards.length > 1) return `甩牌，${cards.length} 张`;
+    return cardSpeech(cards[0]);
+  }
+  // 跟牌：整手主牌去杀副牌，就是「毙」
+  if (allTrump && (lead.type !== 'single' || !isTrumpC(lead.cards[0], trumpSuit))) {
+    return cards.length > 1 ? `毙，${cards.length} 张` : '毙';
+  }
+  if (cards.length === 1) return cardSpeech(cards[0]);
+  return cards.map(cardSpeech).join('，');
+}
+
 // 根据前后两帧房间状态播放牌局音效
 function playRoomSounds(prev, room) {
   const A = window.GameAudio;
   if (!A || !prev || prev.id !== room.id || prev.roundNo !== room.roundNo) return;
   const mySeat = room.mySeat;
+  const trumpSuit = room.trumpSuit;
   // 有人出牌
   const prevPlays = (prev.trick && prev.trick.plays) || [];
   const nowPlays = (room.trick && room.trick.plays) || [];
-  if (nowPlays.length > prevPlays.length) A.sfx('play');
+  if (nowPlays.length > prevPlays.length) {
+    A.sfx('play');
+    const lead = room.trick && room.trick.lead;
+    const fresh = nowPlays.slice(prevPlays.length);
+    const words = fresh.map((p) => playSpeech(p.cards, lead, trumpSuit)).filter(Boolean);
+    if (words.length) A.say(words.join('，'));
+  }
   // 一墩结束
   if (prev.lastTrick && (!room.lastTrick || prev.lastTrick.at !== room.lastTrick.at)) {
     A.sfx('trick');
@@ -402,13 +454,18 @@ function playRoomSounds(prev, room) {
   const nowDecl = room.declaration && room.declaration.last;
   if (nowDecl && (!prevDecl || prevDecl.seat !== nowDecl.seat || prevDecl.suit !== nowDecl.suit)) {
     A.sfx('declare');
+    A.say(`${nowDecl.kind === 'combo25' ? '反主' : '亮主'}，${SUIT_NAME[nowDecl.suit]}`);
   }
   // 叫分
-  if (room.state === 'bidding' && (room.bidValue || 0) > (prev.bidValue || 0)) A.sfx('bid');
+  if (room.state === 'bidding' && (room.bidValue || 0) > (prev.bidValue || 0)) {
+    A.sfx('bid');
+    A.say(`${room.bidValue} 分`);
+  }
   // 本局结算
   if (room.state === 'finished' && prev.state !== 'finished' && room.result) {
     const wins = (room.result.sides || []).some((s) => s.won && s.seats.includes(mySeat));
     setTimeout(() => A.sfx(wins ? 'win' : 'lose'), 320);
+    A.say(room.result.title || '本局结束');
   }
 }
 
@@ -1471,6 +1528,7 @@ function openAudioPanel() {
   if (!A) return;
   $('#music-switch').checked = A.musicOn;
   $('#sfx-switch').checked = A.sfxOn;
+  $('#voice-switch').checked = A.voiceOn;
   $('#audio-overlay').classList.remove('hidden');
 }
 
@@ -1504,6 +1562,12 @@ function bind() {
   if (sfxSwitch) {
     sfxSwitch.addEventListener('change', () => {
       if (window.GameAudio) sfxSwitch.checked = window.GameAudio.setSfx(sfxSwitch.checked);
+    });
+  }
+  const voiceSwitch = $('#voice-switch');
+  if (voiceSwitch) {
+    voiceSwitch.addEventListener('change', () => {
+      if (window.GameAudio) voiceSwitch.checked = window.GameAudio.setVoice(voiceSwitch.checked);
     });
   }
 

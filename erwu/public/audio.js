@@ -7,8 +7,8 @@
   } catch {
     saved = {};
   }
-  // 背景音乐默认关闭（浏览器自动播放策略），音效默认开启
-  const conf = { music: saved.music === true, sfx: saved.sfx !== false };
+  // 背景音乐默认关闭（浏览器自动播放策略），音效与语音播报默认开启
+  const conf = { music: saved.music === true, sfx: saved.sfx !== false, voice: saved.voice !== false };
 
   let ctx = null;
   let sfxBus = null;
@@ -44,6 +44,14 @@
     window.removeEventListener('keydown', unlock);
     window.removeEventListener('touchstart', unlock);
     if (conf.music) startMusic();
+    // iOS / Chrome 需要一次用户手势才能启动语音播报，这里先静音预热一次
+    try {
+      if (window.speechSynthesis) {
+        const u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0;
+        window.speechSynthesis.speak(u);
+      }
+    } catch {}
   }
   window.addEventListener('pointerdown', unlock, { passive: true });
   window.addEventListener('touchstart', unlock, { passive: true });
@@ -197,14 +205,51 @@
     musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.5);
   }
 
+  // ---------- 语音播报（点数 / 牌型 / 毙牌）----------
+  let zhVoice = null;
+
+  function pickVoice() {
+    if (!window.speechSynthesis) return;
+    const list = window.speechSynthesis.getVoices() || [];
+    zhVoice =
+      list.find((v) => /^zh[-_]CN/i.test(v.lang) && /female|女|Ting|Xiao/i.test(v.name)) ||
+      list.find((v) => /^zh/i.test(v.lang)) ||
+      list.find((v) => /Chinese|中文|普通话/i.test(v.name)) ||
+      null;
+  }
+  if (window.speechSynthesis) {
+    pickVoice();
+    window.speechSynthesis.onvoiceschanged = pickVoice;
+  }
+
+  // 语音播报新内容时打断上一条，避免排队积压
+  function say(text) {
+    if (!conf.voice || !text) return;
+    if (!window.speechSynthesis) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(String(text));
+      u.lang = 'zh-CN';
+      if (zhVoice) u.voice = zhVoice;
+      u.rate = 1.3;
+      u.pitch = 1;
+      u.volume = 1;
+      window.speechSynthesis.speak(u);
+    } catch {}
+  }
+
   window.GameAudio = {
     sfx,
+    say,
     unlock,
     get musicOn() {
       return conf.music;
     },
     get sfxOn() {
       return conf.sfx;
+    },
+    get voiceOn() {
+      return conf.voice;
     },
     setMusic(on) {
       conf.music = !!on;
@@ -218,6 +263,17 @@
       save();
       if (conf.sfx) sfx('click');
       return conf.sfx;
+    },
+    setVoice(on) {
+      conf.voice = !!on;
+      save();
+      if (!conf.voice && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
+      }
+      if (conf.voice) say('语音播报已开启');
+      return conf.voice;
     },
   };
 })();
