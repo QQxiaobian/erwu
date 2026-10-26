@@ -58,6 +58,7 @@ const state = {
   adminTab: 'users',
   allowRegister: true,
   cardCounter: false,
+  biddingChoice: null,
   wsRetry: null,
 };
 
@@ -325,6 +326,11 @@ function onRoom(room) {
     state.resultOpen = false;
     state.burySuit = null;
     state.trickAnimKey = null;
+    state.biddingChoice = null;
+  }
+  // 离开叫分阶段（或轮到的玩家变了）时重置选择
+  if (!room.bidding || !prev || !prev.bidding || prev.bidding.turn !== room.bidding.turn) {
+    state.biddingChoice = null;
   }
   // 新一局发牌：手牌从 0 变为非空时触发发牌动画（约 1 秒完成）
   if (prevHandCount === 0 && (room.hand || []).length > 0) {
@@ -810,22 +816,42 @@ function phaseBidding(r) {
   let actions = '';
   if (r.mySeat >= 0 && b.turn === r.mySeat) {
     const base = b.highestBidder === null ? 55 : b.currentBid + 5;
-    const values = [base, base + 5, base + 10];
-    actions =
-      values.map((v) => `<button class="btn small primary" data-action="bid" data-value="${v}">叫 ${v} 分</button>`).join('') +
-      `<button class="btn small ghost" data-action="bid" data-value="pass">过</button>`;
+    // 可用加分：从 base 起 5 分一档到 95
+    const options = [];
+    for (let v = base; v <= 95; v += 5) options.push(v);
+    // 状态：state.biddingChoice 可能是 null（未选）、'add'（选了加分）
+    const choice = state.biddingChoice === 'add' && options.length > 0 ? 'add' : null;
+    if (choice === 'add') {
+      actions =
+        `<div class="bid-option-group">
+          <span class="phase-desc">选择加分数值：</span>
+          <div class="bid-grid">
+            ${options.map((v) => `<button class="btn small primary" data-action="bid" data-value="${v}">+${v - (b.highestBidder === null ? 55 : b.currentBid)} · ${v} 分</button>`).join('')}
+          </div>
+          <div class="bid-foot-row">
+            <button class="btn small ghost" data-action="bid-choice" data-choice="none">← 返回</button>
+            <button class="btn small ghost danger" data-action="bid" data-value="pass">不加（过）</button>
+          </div>
+        </div>`;
+    } else {
+      actions =
+        `<button class="btn small ghost danger" data-action="bid" data-value="pass">不加（过）</button>` +
+        (options.length > 0
+          ? `<button class="btn small primary" data-action="bid-choice" data-choice="add">加分</button>`
+          : `<button class="btn small ghost" disabled>已到最高分</button>`);
+    }
   } else {
     actions = `<span class="phase-countdown" data-deadline="${r.deadline || ''}"></span>`;
   }
   const desc =
     r.mySeat === b.turn
-      ? `轮到你叫分：当前 ${b.currentBid} 分，只能按 5 的倍数加价。`
+      ? `轮到你叫分：当前${b.highestBidder === null ? '底' : ''}分 ${b.currentBid}，可选加分或不加。`
       : `当前最高 ${b.currentBid} 分${b.highestBidder !== null ? `（${esc(seatName(b.highestBidder))}）` : ''} · 等待 ${esc(seatName(b.turn))} 叫分。`;
   return `<div>
       <div class="phase-title">叫分竞标</div>
       <div class="phase-desc">${desc}${passedNames.length ? ` · 已过：${esc(passedNames.join('、'))}` : ''}</div>
     </div>
-    <div class="phase-actions">${actions}</div>`;
+    <div class="phase-actions bid-actions">${actions}</div>`;
 }
 
 function phaseBurying(r) {
@@ -1078,7 +1104,13 @@ async function handleAction(action, el) {
       break;
     case 'bid': {
       const value = el.dataset.value === 'pass' ? 'pass' : Number(el.dataset.value);
+      state.biddingChoice = null;
       send({ t: 'bid', value });
+      break;
+    }
+    case 'bid-choice': {
+      state.biddingChoice = el.dataset.choice === 'add' ? 'add' : null;
+      renderPhase();
       break;
     }
     case 'close-result':

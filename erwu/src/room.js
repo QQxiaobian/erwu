@@ -447,6 +447,7 @@ export class Room {
 
     const val = Number(value);
     if (!Number.isInteger(val) || val % 5 !== 0) return { ok: false, error: '叫分必须是 5 的倍数' };
+    if (val > 95) return { ok: false, error: '叫分不能超过 95 分' };
     if (b.highestBidder === null) {
       if (val < 55) return { ok: false, error: '起叫分不能低于 55' };
     } else if (val <= b.currentBid) {

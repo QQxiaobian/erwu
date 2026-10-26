@@ -944,6 +944,24 @@ button, input, select { font: inherit; }
 .phase-desc { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
 .phase-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-left: auto; }
 .phase-actions .btn { padding: 7px 12px; font-size: 12.5px; }
+.bid-actions .bid-option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-left: auto;
+}
+.bid-actions .bid-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+.bid-actions .bid-foot-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.bid-actions .bid-foot-row .btn { padding: 6px 10px; font-size: 12px; }
 .phase-countdown {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 12px;
