@@ -147,7 +147,12 @@ function cardHTML(card, opts = {}) {
   const style = deal ? `style="animation-delay:${opts.dealDelay}ms"` : '';
   if (opts.back) return `<div class="card mini back"></div>`;
   if (isJoker) {
-    return `<div class="${classes}" data-id="${card.id}" ${style}><span class="joker-text">${card.r === 'BJ' ? '大王' : '小王'}</span></div>`;
+    // 左上角同样显示「大 / 王」标识，避免牌叠放时看不清
+    return `<div class="${classes}" data-id="${card.id}" ${style}>
+      <span class="rank">${card.r === 'BJ' ? '大' : '小'}</span>
+      <span class="suit">王</span>
+      <span class="joker-text">${card.r === 'BJ' ? '大王' : '小王'}</span>
+    </div>`;
   }
   const sym = SUIT_SYM[card.s];
   const pts = cardPoints(card);
@@ -709,9 +714,20 @@ function centerHTML() {
     foot = `${r.result.detail}`;
   }
 
+  // 抓底牌后公开的 6 张底牌：所有玩家可见
+  let bottomRow = '';
+  if (r.bottomRevealed && r.state !== 'finished' && Array.isArray(r.bottom) && r.bottom.length) {
+    const cards = r.bottom.map((c) => cardHTML(c, { mini: true, trumpSuit: r.trumpSuit })).join('');
+    bottomRow = `<div class="bottom-reveal">
+      <span class="br-label">底牌公开</span>
+      <div class="play-cards br-cards">${cards}</div>
+    </div>`;
+  }
+
   return `${trumpBadge}
     <div class="center-status">${status}</div>
     <div class="trick-zone">${groups}</div>
+    ${bottomRow}
     <div class="center-foot">${foot}</div>`;
 }
 

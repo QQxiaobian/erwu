@@ -59,6 +59,7 @@ export class Room {
 
     this.bottomPool = [];
     this.bottom = [];
+    this.bottomPickup = [];
     this.bottomRevealed = false;
 
     this.trick = { lead: null, plays: [] };
@@ -271,6 +272,7 @@ export class Room {
     }
     this.bottomPool = deck.slice(cursor);
     this.bottom = [];
+    this.bottomPickup = [];
     this.bottomRevealed = false;
     this.trumpSuit = null;
     this.declarerSeat = null;
@@ -385,6 +387,16 @@ export class Room {
       this.trumpSuit = last.suit;
       this.declarerSeat = last.seat;
       this._log(`定主：${SUIT_NAMES[last.suit]}，${last.name} 坐庄`, 'round');
+    } else if (this.mode === 'team') {
+      // 队家模式：第一轮无人亮主重新发牌；再次无人亮主则开底牌定主
+      if (this.redeals < 1) {
+        this.redeals++;
+        this._deal();
+        this._initDeclaration(true);
+        this._log('无人亮主，重新发牌', 'warn');
+        return;
+      }
+      this._openBottomTrump();
     } else if (this.redeals < 2) {
       this.redeals++;
       this._deal();
@@ -404,9 +416,34 @@ export class Room {
     this._touch();
   }
 
+  // 队家模式无人亮主：按顺序开底牌定主。
+  // 底牌中有 2 则第一张 2 的花色为主，否则底牌中最大一张牌的花色为主。
+  _openBottomTrump() {
+    const pool = this.bottomPool.slice();
+    if (!pool.length) return;
+    const firstTwo = pool.find((c) => c.r === '2');
+    let trigger;
+    if (firstTwo) {
+      trigger = firstTwo;
+    } else {
+      trigger = pool.reduce((best, c) => (power(c, null) > power(best, null) ? c : best), pool[0]);
+    }
+    this.trumpSuit = trigger.s;
+    this.declarerSeat = 0;
+    this.bottomPickup = pool.slice();
+    this.bottomRevealed = true;
+    this._log(
+      `无人亮主，开底牌定主：${cardsName(pool)}，${SUIT_NAMES[trigger.s]} 成为主花色，${this.seats[0].name} 坐庄`,
+      'round',
+    );
+  }
+
   _pickupBottom() {
     if (!this.bottomPool.length) return;
     const seat = this.seats[this.declarerSeat];
+    // 抓底牌后公开这 6 张，所有玩家可见
+    this.bottomPickup = this.bottomPool.slice();
+    this.bottomRevealed = true;
     seat.hand.push(...this.bottomPool);
     this.bottomPool = [];
     // 拿底牌后重新整理：噶点未定主用 sortBySuit，其他模式用 sortHand
@@ -501,19 +538,18 @@ export class Room {
   _finishBidding() {
     const b = this.bidding;
     if (!b) return { ok: false, error: '叫分状态异常' };
-    // 全部过牌无人叫分：重发牌重新叫（最多 2 次）
-    if (b.highestBidder === null && this.redeals < 2) {
+    // 全部过牌无人叫分：一直重新发牌重新叫
+    if (b.highestBidder === null) {
       this.redeals++;
       this._deal();
       this._initBidding();
       this._log('叫分全部过牌，重新发牌', 'warn');
       return { ok: true };
     }
-    const declarer = b.highestBidder !== null ? b.highestBidder : b.candidate;
-    this.declarerSeat = declarer;
-    this.bidValue = b.highestBidder !== null ? b.currentBid : 55;
+    this.declarerSeat = b.highestBidder;
+    this.bidValue = b.currentBid;
     this.bidding = null;
-    this._log(`叫分结束：${this.seats[declarer].name} 以 ${this.bidValue} 分成为专家`, 'round');
+    this._log(`叫分结束：${this.seats[this.declarerSeat].name} 以 ${this.bidValue} 分成为专家`, 'round');
     this._pickupBottom();
     this.state = 'burying';
     this.deadline = Date.now() + this._buryDelay();
@@ -830,6 +866,29 @@ export class Room {
     return null;
   }
 
+  // 人机叫分意愿：按手牌强度评估，重发次数越多越愿意叫
+  _botBidTarget(seatIdx) {
+    const seat = this.seats[seatIdx];
+    if (!seat) return null;
+    let perm = 0;
+    const suitScore = { S: 0, H: 0, C: 0, D: 0 };
+    for (const card of seat.hand) {
+      if (card.s === 'J' || card.r === '5' || card.r === '2') {
+        perm += 1;
+        continue;
+      }
+      const w = card.r === 'A' ? 3 : card.r === 'K' ? 2.5 : card.r === 'Q' ? 1.5 : card.r === '10' ? 1 : 0.5;
+      suitScore[card.s] += w;
+    }
+    const best = Math.max(...SUITS.map((s) => suitScore[s]));
+    const score = perm * 2 + best;
+    const need = this.redeals >= 2 ? 0 : this.redeals === 1 ? 6 : 8;
+    if (score < need) return null;
+    // 叫分必须是 5 的倍数
+    const raw = 55 + (score - need) * 3;
+    return Math.min(95, Math.max(55, Math.round(raw / 5) * 5));
+  }
+
   _actBot() {
     if (this.state === 'declaring') {
       const bots = this.seats.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.isBot);
@@ -856,7 +915,14 @@ export class Room {
       return;
     }
     if (this.state === 'bidding') {
-      this._bidSeat(this.bidding.turn, 'pass', true);
+      const t = this.bidding.turn;
+      const target = this._botBidTarget(t);
+      const minNext = this.bidding.highestBidder === null ? 55 : this.bidding.currentBid + 5;
+      if (target !== null && target >= minNext && minNext <= 95) {
+        this._bidSeat(t, Math.min(target, 95), true);
+      } else {
+        this._bidSeat(t, 'pass', true);
+      }
       return;
     }
     if (this.state === 'burying') {
@@ -892,8 +958,12 @@ export class Room {
       changed = true;
     } else if (this.state === 'bidding' && now >= this.deadline) {
       const t = this.bidding && this.bidding.turn;
-      if (t !== null && t !== undefined) this._bidSeat(t, 'pass', true);
-      changed = true;
+      const isBotTurn = t !== null && t !== undefined && this.seats[t] && this.seats[t].isBot;
+      // 人机的回合交给 _actBot 处理（它可能加分），超时托管只对真人生效
+      if (!isBotTurn) {
+        if (t !== null && t !== undefined) this._bidSeat(t, 'pass', true);
+        changed = true;
+      }
     } else if (this.state === 'burying' && now >= this.deadline) {
       this._autoBury();
       changed = true;
@@ -986,7 +1056,10 @@ export class Room {
         : null,
       bottomCount: 6,
       bottomRevealed: this.bottomRevealed,
-      bottom: this.bottomRevealed ? sortHand(this.bottom, this.trumpSuit) : null,
+      // 牌局结束显示扣回的底牌，其余阶段显示庄家抓起的 6 张（全员可见）
+      bottom: this.bottomRevealed
+        ? sortHand(this.state === 'finished' ? this.bottom : this.bottomPickup, this.trumpSuit)
+        : null,
       result: this.state === 'finished' ? this.result : null,
       canStart:
         (this.hostId === userId || hostGone) &&

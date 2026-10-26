@@ -636,6 +636,21 @@ button, input, select { font: inherit; }
 .play-name.winner { color: var(--gold-bright); font-weight: 700; }
 .center-foot { font-size: 11px; color: rgba(147, 169, 157, 0.9); font-family: ui-monospace, Menlo, monospace; }
 
+/* 抓底后公开的底牌 */
+.bottom-reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.bottom-reveal .br-label {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: rgba(217, 180, 95, 0.85);
+}
+.bottom-reveal .br-cards .card { opacity: 0.92; }
+
 /* 主牌标识 */
 .trump-indicator {
   display: inline-flex;

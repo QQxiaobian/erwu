@@ -11,6 +11,8 @@ import {
   resolveTrick,
   isCombo25,
   autoSelect,
+  sortHand,
+  sortBySuit,
 } from '../src/game/cards.js';
 import { Room } from '../src/room.js';
 
@@ -274,35 +276,83 @@ for (const mode of ['grab', 'team']) {
   }
 }
 
-test('噶点模式：全员过牌重发两次 + 第三次保底', () => {
+test('噶点模式：全员过牌一直重发，不保底', () => {
   const room = newRoom('ga', 4);
   room.startRound('u0');
   assert.equal(room.state, 'bidding');
-  // 重发第一次全员过
-  for (let i = 0; i < 4; i++) {
-    const r = room.bid(`u${room.bidding.turn}`, 'pass');
-    assert.ok(r.ok, r.error);
+  // 连续 3 次全员过牌都应重发，不会保底坐庄
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < 4; i++) {
+      const r = room.bid(`u${room.bidding.turn}`, 'pass');
+      assert.ok(r.ok, r.error);
+    }
+    assert.equal(room.state, 'bidding', `第 ${round + 1} 次全员过应继续重发`);
+    assert.equal(room.redeals, round + 1);
   }
-  assert.equal(room.state, 'bidding', '第一次全员过应重发重新叫分');
-  assert.equal(room.redeals, 1);
-  // 重发第二次全员过
-  for (let i = 0; i < 4; i++) {
-    const r = room.bid(`u${room.bidding.turn}`, 'pass');
-    assert.ok(r.ok, r.error);
+  // 有人加分后正常进入扣底
+  const seat = room.bidding.turn;
+  assert.ok(room.bid(`u${seat}`, 60).ok);
+  for (let i = 0; i < 3; i++) {
+    assert.ok(room.bid(`u${room.bidding.turn}`, 'pass').ok);
   }
-  assert.equal(room.state, 'bidding', '第二次全员过仍应重发');
-  assert.equal(room.redeals, 2);
-  // 第三次全员过 → 达到上限，候选以 55 分保底坐庄
-  for (let i = 0; i < 4; i++) {
-    const r = room.bid(`u${room.bidding.turn}`, 'pass');
-    assert.ok(r.ok, r.error);
-  }
-  assert.equal(room.state, 'burying', '第三次全员过应保底坐庄');
-  assert.equal(room.bidValue, 55);
-  assert.equal(room.declarerSeat, 0);
-  room.bury(`u0`, 'H', room.seats[0].hand.slice(0, 6).map((x) => x.id));
+  assert.equal(room.bidValue, 60);
+  assert.equal(room.declarerSeat, seat);
+  room.bury(`u${seat}`, 'H', room.seats[seat].hand.slice(0, 6).map((x) => x.id));
   assert.equal(room.state, 'playing');
-  assert.equal(room.trumpSuit, 'H');
+  autoPlayOut(room);
+  assert.equal(room.state, 'finished');
+});
+
+test('手牌排序：大王→小王→所有5→所有2→主花色→副牌按花色', () => {
+  const cards = [c('HA'), c('SK'), c('D2'), c('BJ'), c('LJ'), c('C5'), c('S2'), c('S9'), c('DQ'), c('CK')];
+  const got = sortHand(cards, 'S').map((x) => x.id);
+  assert.deepEqual(got, ['BJ', 'LJ', 'C5', 'S2', 'D2', 'SK', 'S9', 'HA', 'CK', 'DQ']);
+});
+
+test('未定主花色也把常主提前：大王→小王→5→2→各花色分组', () => {
+  const cards = [c('HA'), c('C5'), c('BJ'), c('D2'), c('LJ'), c('S9'), c('CQ')];
+  const got = sortBySuit(cards).map((x) => x.id);
+  assert.deepEqual(got, ['BJ', 'LJ', 'C5', 'D2', 'S9', 'HA', 'CQ']);
+});
+
+test('抓底牌后底牌对所有玩家公开', () => {
+  const room = newRoom('grab', 3);
+  room.startRound('u0');
+  declareFirst(room);
+  room._finalizeDeclaration();
+  assert.equal(room.state, 'burying');
+  assert.equal(room.bottomRevealed, true);
+  assert.equal(room.bottomPickup.length, 6);
+  for (const uid of ['u0', 'u1', 'u2']) {
+    const v = room.viewFor(uid);
+    assert.equal(v.bottomRevealed, true);
+    assert.equal(v.bottom.length, 6, `${uid} 应能看到公开的底牌`);
+  }
+});
+
+test('队家模式：首轮无人亮主重发，再次无人亮主开底牌定主', () => {
+  const room = newRoom('team', 4);
+  room.startRound('u0');
+  assert.equal(room.state, 'declaring');
+  // 第一轮全员不亮 → 重发
+  for (let i = 0; i < 4; i++) room.passDeclaration(`u${i}`);
+  assert.equal(room.state, 'declaring', '首轮无人亮主应重发');
+  assert.equal(room.redeals, 1);
+  // 第二轮全员不亮 → 开底牌定主
+  for (let i = 0; i < 4; i++) room.passDeclaration(`u${i}`);
+  assert.equal(room.state, 'burying', '再次无人亮主应开底牌定主');
+  assert.equal(room.declarerSeat, 0);
+  assert.equal(room.bottomPickup.length, 6);
+  assert.equal(room.bottomRevealed, true);
+  const firstTwo = room.bottomPickup.find((x) => x.r === '2');
+  if (firstTwo) {
+    assert.equal(room.trumpSuit, firstTwo.s, '底牌有 2 时第一张 2 的花色定主');
+  } else {
+    const best = room.bottomPickup.reduce((a, b) => (power(a, null) >= power(b, null) ? a : b));
+    assert.equal(room.trumpSuit, best.s, '无 2 时底牌最大一张的花色定主');
+  }
+  room.bury('u0', room.trumpSuit, room.seats[0].hand.slice(0, 6).map((x) => x.id));
+  assert.equal(room.state, 'playing');
   autoPlayOut(room);
   assert.equal(room.state, 'finished');
   assert.ok(room.result);

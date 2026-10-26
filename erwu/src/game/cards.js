@@ -350,13 +350,20 @@ export function sortBySuit(cards) {
       if (sa !== sb) return sa - sb;
       return RANKS.indexOf(b.r) - RANKS.indexOf(a.r);
     }
-    // 同为常主：王 > 5 > 2；同点数按花色 S/H/C/D 排
-    const rankGroup = (c) => (c.s === 'J' ? 0 : c.r === '5' ? 1 : 2);
-    const ga = rankGroup(a);
-    const gb = rankGroup(b);
+    // 同为常主：大王 > 小王 > 所有 5 > 所有 2；同点数按花色 S/H/C/D 排
+    const ga = permRankGroup(a);
+    const gb = permRankGroup(b);
     if (ga !== gb) return ga - gb;
     return (suitOrder[a.s] ?? 5) - (suitOrder[b.s] ?? 5);
   });
+}
+
+// 常主内部排序权重：大王 0、小王 1、5 为 2、2 为 3
+function permRankGroup(card) {
+  if (card.r === 'BJ') return 0;
+  if (card.r === 'SJ') return 1;
+  if (card.r === '5') return 2;
+  return 3;
 }
 
 export function sortHand(cards, trumpSuit) {
@@ -369,10 +376,9 @@ export function sortHand(cards, trumpSuit) {
     if (ag !== bg) return ag - bg;
 
     if (ag === 0) {
-      // 常主：王 > 5 > 2；同点数按花色 S/H/C/D 排
-      const rankGroup = (c) => (c.s === 'J' ? 0 : c.r === '5' ? 1 : 2);
-      const ga = rankGroup(a);
-      const gb = rankGroup(b);
+      // 常主：大王 > 小王 > 所有 5 > 所有 2；同点数按花色 S/H/C/D 排
+      const ga = permRankGroup(a);
+      const gb = permRankGroup(b);
       if (ga !== gb) return ga - gb;
       return (suitOrder[a.s] ?? 5) - (suitOrder[b.s] ?? 5);
     }
