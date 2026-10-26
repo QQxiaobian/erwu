@@ -229,6 +229,32 @@ export class Room {
     return { ok: true };
   }
 
+  // 换座：与目标座位交换；目标为空则直接移过去
+  takeSeat(userId, targetIdx) {
+    if (this.state !== 'waiting' && this.state !== 'finished') {
+      return { ok: false, error: '牌局进行中不能换座' };
+    }
+    const cur = this.seatOf(userId);
+    if (cur < 0) return { ok: false, error: '你不在该房间' };
+    if (targetIdx === cur) return { ok: true };
+    if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= this.maxSeats) {
+      return { ok: false, error: '座位号无效' };
+    }
+    [this.seats[cur], this.seats[targetIdx]] = [this.seats[targetIdx], this.seats[cur]];
+    const moved = this.seats[targetIdx];
+    const other = this.seats[cur];
+    if (other) {
+      this._log(`${moved.name} 与 ${other.name} 交换座位`, 'info');
+    } else {
+      this._log(`${moved.name} 坐到 ${targetIdx + 1} 号位`, 'info');
+    }
+    // 换座后重置准备状态
+    moved.ready = false;
+    if (other) other.ready = false;
+    this._touch();
+    return { ok: true };
+  }
+
   _deal() {
     const deck = shuffle(makeDeck());
     const per = Math.floor(48 / this.maxSeats);

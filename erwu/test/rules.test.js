@@ -45,7 +45,10 @@ test('5 > 大王 > 小王 > 2 > 主花色普通牌 > 副牌', () => {
   const seq = ['C5', 'BJ', 'LJ', 'D2', 'SA', 'SK', 'HA'].map((id) => power(c(id), t));
   for (let i = 1; i < seq.length; i++) assert.ok(seq[i - 1] > seq[i], `${seq[i - 1]} > ${seq[i]}`);
 });
-test('同点数常主牌力相等', () => {
+test('主花色的 5、2 大于其他花色的 5、2', () => {
+  assert.ok(power(c('S5'), 'S') > power(c('H5'), 'S'));
+  assert.ok(power(c('S2'), 'S') > power(c('D2'), 'S'));
+  // 非主花色的同点数常主仍然相等
   assert.equal(power(c('C5'), 'S'), power(c('H5'), 'S'));
   assert.equal(power(c('C2'), 'S'), power(c('D2'), 'S'));
 });
@@ -190,6 +193,14 @@ test('25 组合之间同点数相等，25 压普通主牌，金鸡压 25', () =>
   assert.equal(resolveTrick(lead, plays, 'S'), 3);
   const plays2 = plays.slice(0, 3).concat([{ seat: 3, cards: [c('H3'), c('H4')] }]);
   assert.equal(resolveTrick(lead, plays2, 'S'), 0);
+});
+test('主花色 25 组合大于其他花色 25 组合', () => {
+  const lead = { seat: 0, cards: [c('C2'), c('C5')], type: 'combo25' };
+  const plays = [
+    { seat: 0, cards: [c('C2'), c('C5')] },
+    { seat: 1, cards: [c('S2'), c('S5')] },
+  ];
+  assert.equal(resolveTrick(lead, plays, 'S'), 1);
 });
 test('甩牌：主牌杀牌后比最大主', () => {
   const lead = { seat: 0, cards: [c('HA'), c('HK')], type: 'throw' };
@@ -385,6 +396,23 @@ test('牌局中离开后可以重新回到原座位', () => {
   assert.equal(room.hasMember('u1'), true);
   assert.equal(room.seats[1].detached, false);
   assert.ok(room.seats[1].connected);
+});
+
+test('等待阶段可以换座或入座', () => {
+  const room = newRoom('grab', 3);
+  // u0 在 0 号位，换到 1 号位（与 u1 交换）
+  assert.ok(room.takeSeat('u0', 1).ok);
+  assert.equal(room.seatOf('u0'), 1);
+  assert.equal(room.seatOf('u1'), 0);
+  // 换到空位
+  room.leave('u2');
+  assert.ok(room.takeSeat('u0', 2).ok);
+  assert.equal(room.seatOf('u0'), 2);
+  assert.equal(room.seats[1], null);
+  // 补满座位后开局，验证牌局中不能换座
+  assert.ok(room.addBot('u0').ok);
+  assert.ok(room.startRound('u0').ok);
+  assert.equal(room.takeSeat('u0', 0).ok, false);
 });
 
 function addBotOk(room) {

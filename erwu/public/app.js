@@ -26,6 +26,8 @@ const state = {
   ws: null,
   connected: false,
   rooms: [],
+  onlineCount: 0,
+  onlineUsers: [],
   room: null,
   selected: new Set(),
   burySuit: null,
@@ -235,6 +237,8 @@ function handleMessage(msg) {
     case 'hello':
       state.user = msg.user;
       state.rooms = msg.rooms || [];
+      state.onlineCount = msg.onlineCount || 0;
+      state.onlineUsers = msg.onlineUsers || [];
       applyUser();
       if (msg.room) {
         onRoom(msg.room);
@@ -246,6 +250,8 @@ function handleMessage(msg) {
       break;
     case 'rooms':
       state.rooms = msg.rooms || [];
+      state.onlineCount = msg.onlineCount ?? state.onlineCount;
+      state.onlineUsers = msg.onlineUsers ?? state.onlineUsers;
       if (!state.room) renderLobby();
       break;
     case 'room':
@@ -353,6 +359,18 @@ function applyUser() {
 }
 
 function renderLobby() {
+  const online = $('#online-list');
+  if (online) {
+    const me = state.user && state.user.id;
+    const names = (state.onlineUsers || [])
+      .map((u) => {
+        const nm = u.nickname || u.username || u.name || '?';
+        return u.id === me ? `${nm}（我）` : nm;
+      })
+      .join('、');
+    online.innerHTML = `<span class="online-count">在线 ${state.onlineCount || 0} 人</span>` +
+      (names ? `<span class="online-names">${esc(names)}</span>` : '');
+  }
   const list = $('#room-list');
   const rooms = state.rooms || [];
   if (!rooms.length) {
@@ -476,11 +494,23 @@ function renderFelt() {
       if (r.mode === 'team') badges.push(`<span class="badge ${s.team === 0 ? 'team-a' : 'team-b'}">${s.team === 0 ? 'A队' : 'B队'}</span>`);
       if (r.state !== 'waiting') badges.push(`<span class="badge">${s.cardCount} 张</span>`);
       const classes = ['seat', `pos-${pos}`, s.isTurn ? 'turn' : '', s.connected ? '' : 'offline'].filter(Boolean).join(' ');
+      const canSwap = r.state === 'waiting' || r.state === 'finished';
+      let swapBtn = '';
+      if (canSwap) {
+        if (s.seat === r.mySeat) {
+          swapBtn = `<div class="seat-swap mine">我的座位</div>`;
+        } else if (s.empty) {
+          swapBtn = `<button class="seat-swap" data-action="seat" data-seat="${s.seat}">入座</button>`;
+        } else {
+          swapBtn = `<button class="seat-swap" data-action="seat" data-seat="${s.seat}">换座</button>`;
+        }
+      }
       return `<div class="${classes}">
         <div class="avatar">${esc((s.name || '?').slice(0, 1))}</div>
         <div class="seat-name">${esc(s.name)}${s.seat === r.mySeat ? '（我）' : ''}</div>
         <div class="seat-badges">${badges.join('')}</div>
         <div class="seat-points ${s.captured ? '' : 'zero'}">${s.captured} 分</div>
+        ${swapBtn}
       </div>`;
     })
     .join('');
@@ -936,6 +966,9 @@ async function handleAction(action, el) {
         if (!confirm('牌局进行中，离开后将自动托管。确定离开吗？')) return;
       }
       send({ t: 'room.leave' });
+      break;
+    case 'seat':
+      send({ t: 'seat.take', seat: Number(el.dataset.seat) });
       break;
     case 'play':
       if (!r || r.state !== 'playing' || r.turn !== r.mySeat) return;

@@ -51,11 +51,12 @@ export function isTrump(card, trumpSuit) {
 }
 
 // 单张牌力。5 > 大王 > 小王 > 2 > 本局花色普通主牌 > 副牌
+// 本局主花色的 5、2 分别大于其他花色的 5、2
 export function power(card, trumpSuit) {
-  if (card.r === '5') return 1000;
+  if (card.r === '5') return card.s === trumpSuit ? 1010 : 1000;
   if (card.r === 'BJ') return 950;
   if (card.r === 'SJ') return 940;
-  if (card.r === '2') return 900;
+  if (card.r === '2') return card.s === trumpSuit ? 910 : 900;
   if (card.s === trumpSuit) return 500 + rankIndex(card.r);
   return 100 + rankIndex(card.r);
 }
@@ -269,7 +270,18 @@ export function resolveTrick(lead, plays, trumpSuit) {
     const joker = plays.find((p) => p.cards.length === 2 && isJokerPair(p.cards));
     if (joker) return joker.seat;
     const combos = plays.filter((p) => p.cards.length === 2 && isCombo25(p.cards, trumpSuit));
-    if (combos.length) return combos[0].seat; // 25 组合之间按先出者胜（5、2 同点数牌力相等）
+    if (combos.length) {
+      let best = combos[0];
+      let bestPw = Math.max(...best.cards.map((c) => power(c, trumpSuit)));
+      for (const p of combos.slice(1)) {
+        const pw = Math.max(...p.cards.map((c) => power(c, trumpSuit)));
+        if (pw > bestPw) {
+          bestPw = pw;
+          best = p;
+        }
+      }
+      return best.seat;
+    }
     let best = null;
     let bestPower = -1;
     for (const p of plays) {

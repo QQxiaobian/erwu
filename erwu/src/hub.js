@@ -63,12 +63,15 @@ export class Hub {
       t: 'hello',
       user: publicUser(full),
       rooms: this.roomList(),
+      onlineCount: this.onlineCount(),
+      onlineUsers: this.onlineUsers(),
       room: inRoom ? inRoom.viewFor(user.id) : null,
     });
 
     ws.on('message', (raw) => this.onMessage(ws, raw));
     ws.on('close', () => this.onClose(ws));
     ws.on('error', () => {});
+    this.broadcastRoomList();
   }
 
   onClose(ws) {
@@ -82,6 +85,7 @@ export class Hub {
           room.setConnected(ws.userId, false);
           this.broadcastRoom(room);
         }
+        this.broadcastRoomList();
       }
     }
   }
@@ -111,6 +115,13 @@ export class Hub {
     return this.sockets.size;
   }
 
+  onlineUsers() {
+    return [...this.sockets.keys()]
+      .map((id) => findById(id))
+      .filter(Boolean)
+      .map((u) => publicUser(u));
+  }
+
   roomList() {
     return [...this.rooms.values()]
       .filter((r) => r.state !== 'finished' || r.seats.some(Boolean))
@@ -130,8 +141,10 @@ export class Hub {
 
   broadcastRoomList() {
     const rooms = this.roomList();
+    const onlineCount = this.onlineCount();
+    const onlineUsers = this.onlineUsers();
     for (const set of this.sockets.values()) {
-      for (const ws of set) this.send(ws, { t: 'rooms', rooms });
+      for (const ws of set) this.send(ws, { t: 'rooms', rooms, onlineCount, onlineUsers });
     }
   }
 
@@ -230,6 +243,9 @@ export class Hub {
     switch (t) {
       case 'room.ready':
         res = room.setReady(user.id, msg.ready);
+        break;
+      case 'seat.take':
+        res = room.takeSeat(user.id, Number(msg.seat));
         break;
       case 'room.addbot':
         res = room.addBot(user.id);
