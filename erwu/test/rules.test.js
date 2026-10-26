@@ -276,6 +276,17 @@ for (const mode of ['grab', 'team']) {
   }
 }
 
+test('甩牌时有同花色副牌不能毙牌', () => {
+  const lead = { seat: 0, cards: [c('CA'), c('CK')], type: 'throw' };
+  // 手里还有梅花副牌 C3，虽然够 2 张主牌也不能毙
+  const hand1 = [c('C3'), c('H3'), c('H6'), c('BJ')];
+  assert.ok(!validateFollow(hand1, [c('H3'), c('H6')], lead, 'H').ok);
+  assert.ok(validateFollow(hand1, [c('C3'), c('H3')], lead, 'H').ok);
+  // 完全没有梅花副牌时才可以毙
+  const hand2 = [c('D3'), c('H3'), c('H6'), c('BJ')];
+  assert.ok(validateFollow(hand2, [c('H3'), c('H6')], lead, 'H').ok);
+});
+
 test('金鸡首出后系统自动为其余玩家跟牌', () => {
   const room = newRoom('grab', 4);
   room.startRound('u0');

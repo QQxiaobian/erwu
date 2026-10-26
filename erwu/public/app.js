@@ -179,9 +179,20 @@ function describeSelection(cards, trumpSuit, lead) {
     if (ranks[0] === '2' && ranks[1] === '5') return '25 组合';
   }
   const allTrump = cards.every((c) => isTrumpC(c, trumpSuit));
+  if (lead && lead.type === 'throw') {
+    const N = lead.cards.length;
+    const suit = lead.cards[0].s;
+    const sameHeld = (state.room.hand || []).filter(
+      (c) => !isTrumpC(c, trumpSuit) && c.s === suit,
+    ).length;
+    if (allTrump && sameHeld > 0) {
+      return `手里还有 ${sameHeld} 张同花色副牌，必须先跟，不能毙牌`;
+    }
+    if (allTrump) return `主牌毙牌 ${cards.length} 张`;
+    if (sameHeld >= N) return `跟 ${N} 张同花色副牌`;
+    return `跟牌 ${cards.length} 张`;
+  }
   if (lead) {
-    // 跟牌阶段：主牌可以毙甩牌，副牌按张数跟
-    if (lead.type === 'throw' && allTrump) return `主牌毙牌 ${cards.length} 张`;
     if (allTrump) return `主牌 ${cards.length} 张`;
     return `跟牌 ${cards.length} 张`;
   }

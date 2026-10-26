@@ -197,14 +197,16 @@ export function validateFollow(hand, played, lead, trumpSuit) {
     const same = hand.filter((c) => !isTrump(c, trumpSuit) && c.s === suit);
     const playedSame = played.filter((c) => !isTrump(c, trumpSuit) && c.s === suit);
     if (same.length >= N) {
-      if (playedSame.length !== N) return err(`必须跟 ${N} 张同花色副牌`);
+      if (playedSame.length !== N) return err(`手里有该花色副牌，必须跟 ${N} 张同花色副牌，不能毙牌`);
       return { ok: true };
     }
-    if (trumps.length >= N && played.every((c) => isTrump(c, trumpSuit))) {
-      return { ok: true };
-    }
+    // 该花色副牌不足：必须先出完这些副牌，再用其他牌补足；没出完就不能毙牌
     if (playedSame.length !== same.length) {
-      return err('必须跟出手上全部该花色副牌，再垫其他牌');
+      return err(
+        same.length
+          ? `必须先出完手上这 ${same.length} 张该花色副牌，再补其他牌，不能毙牌`
+          : '必须跟满张数',
+      );
     }
     return { ok: true };
   }
