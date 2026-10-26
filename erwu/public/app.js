@@ -930,9 +930,16 @@ function phaseDeclaring(r) {
       `<button class="btn small ghost" data-action="pass-declare" ${passed ? 'disabled' : ''}>${passed ? '已过' : '过'}</button>`,
     );
   }
-  const desc = r.trumpSuit
-    ? `当前主花色 ${SUIT_SYM[r.trumpSuit]} ${SUIT_NAME[r.trumpSuit]}，${esc(seatName(r.declarerSeat))} 临时坐庄；可用同花色 2+5 反主。`
-    : '用任意单张 2 亮主；亮主者成为临时庄家。';
+  let desc;
+  if (r.mode === 'team') {
+    desc = r.trumpSuit
+      ? `当前主花色 ${SUIT_SYM[r.trumpSuit]} ${SUIT_NAME[r.trumpSuit]}，本局庄家 ${esc(seatName(r.declarerSeat))} 扣底；可用同花色 2+5 反主换主花色。`
+      : `本局庄家 ${esc(seatName(r.declarerSeat))}（庄家队按座位顺序轮换），由庄家扣底；用任意单张 2 亮主决定主花色。`;
+  } else {
+    desc = r.trumpSuit
+      ? `当前主花色 ${SUIT_SYM[r.trumpSuit]} ${SUIT_NAME[r.trumpSuit]}，${esc(seatName(r.declarerSeat))} 临时坐庄；可用同花色 2+5 反主。`
+      : '用任意单张 2 亮主；亮主者成为临时庄家。';
+  }
   return `<div>
       <div class="phase-title">亮主 / 反主</div>
       <div class="phase-desc">${desc}</div>

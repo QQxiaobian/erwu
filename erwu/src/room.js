@@ -52,6 +52,9 @@ export class Room {
 
     this.trumpSuit = null;
     this.declarerSeat = null;
+    // 队家模式：庄家队（0/1）与庄家座位，跨局保留，发牌前按座位顺序轮换
+    this.bankerTeam = 0;
+    this.dealerSeat = 0;
     this.bidValue = null;
     this.bidding = null;
     this.declaration = null;
@@ -275,7 +278,8 @@ export class Room {
     this.bottomPickup = [];
     this.bottomRevealed = false;
     this.trumpSuit = null;
-    this.declarerSeat = null;
+    // 队家模式庄家已在发牌前确定，亮主只决定主花色
+    this.declarerSeat = this.mode === 'team' ? this.dealerSeat : null;
     this.bidValue = null;
     this.trick = { lead: null, plays: [] };
     this.lastTrick = null;
@@ -305,6 +309,8 @@ export class Room {
 
     this.roundNo++;
     this.redeals = 0;
+    // 队家模式：发牌之前先按顺序确定本局庄家
+    if (this.mode === 'team') this._rotateBanker();
     this._deal();
     this.declaration = null;
     this.bidding = null;
@@ -314,10 +320,40 @@ export class Room {
       this._log(`第 ${this.roundNo} 局开始，发牌完成，进入叫分`, 'round');
     } else {
       this._initDeclaration();
-      this._log(`第 ${this.roundNo} 局开始，发牌完成，请亮主`, 'round');
+      if (this.mode === 'team') {
+        this._log(
+          `第 ${this.roundNo} 局开始，发牌完成。本局庄家：${this.seats[this.dealerSeat].name}（${this.bankerTeam === 0 ? '一队' : '二队'}），请亮主`,
+          'round',
+        );
+      } else {
+        this._log(`第 ${this.roundNo} 局开始，发牌完成，请亮主`, 'round');
+      }
     }
     this._touch();
     return { ok: true };
+  }
+
+  // 队家模式庄家轮换：上一局庄家队守庄成功则庄家队不变，常家上庄则庄家队换成常家队；
+  // 然后从上一局庄家的下家开始按座位顺序，取第一个属于庄家队的玩家坐庄。
+  _rotateBanker() {
+    const res = this.result;
+    if (res && res.mode === 'team' && res.sides) {
+      const prevDealer = Number.isInteger(res.declarerSeat) ? res.declarerSeat : this.dealerSeat;
+      const prevTeam = prevDealer % 2;
+      this.bankerTeam = res.winnerSide === 'defenders' ? 1 - prevTeam : prevTeam;
+      const from = (prevDealer + 1) % this.maxSeats;
+      for (let k = 0; k < this.maxSeats; k++) {
+        const i = (from + k) % this.maxSeats;
+        if (i % 2 === this.bankerTeam) {
+          this.dealerSeat = i;
+          break;
+        }
+      }
+    } else {
+      // 第一局：一队先坐庄，座位 0 拿底牌
+      this.bankerTeam = 0;
+      this.dealerSeat = 0;
+    }
   }
 
   _initDeclaration(redeal = false) {
@@ -325,7 +361,8 @@ export class Room {
     this.declaration = { list: [], passed: new Set(), last: null };
     this.botPassed = new Set();
     this.trumpSuit = null;
-    this.declarerSeat = null;
+    // 队家模式庄家已在发牌前定好，这里保留
+    this.declarerSeat = this.mode === 'team' ? this.dealerSeat : null;
     this.deadline = Date.now() + (redeal ? 12000 : DECLARE_MS);
     this._touch();
   }
@@ -356,7 +393,8 @@ export class Room {
     }
 
     this.trumpSuit = suit;
-    this.declarerSeat = idx;
+    // 队家模式庄家固定，亮主/反主只换主花色
+    this.declarerSeat = this.mode === 'team' ? this.dealerSeat : idx;
     this.declaration.passed.delete(idx);
     this.declaration.last = { seat: idx, name: seat.name, suit, kind, cards: cards.map((c) => c.id), at: Date.now() };
     this.declaration.list.push(this.declaration.last);
@@ -385,8 +423,12 @@ export class Room {
     const last = this.declaration && this.declaration.last;
     if (last) {
       this.trumpSuit = last.suit;
-      this.declarerSeat = last.seat;
-      this._log(`定主：${SUIT_NAMES[last.suit]}，${last.name} 坐庄`, 'round');
+      // 队家模式庄家发牌前已定，亮主只决定主花色
+      this.declarerSeat = this.mode === 'team' ? this.dealerSeat : last.seat;
+      this._log(
+        `定主：${SUIT_NAMES[last.suit]}，${this.seats[this.declarerSeat].name} 坐庄扣底`,
+        'round',
+      );
     } else if (this.mode === 'team') {
       // 队家模式：第一轮无人亮主重新发牌；再次无人亮主则开底牌定主
       if (this.redeals < 1) {
@@ -429,11 +471,11 @@ export class Room {
       trigger = pool.reduce((best, c) => (power(c, null) > power(best, null) ? c : best), pool[0]);
     }
     this.trumpSuit = trigger.s;
-    this.declarerSeat = 0;
+    this.declarerSeat = this.dealerSeat;
     this.bottomPickup = pool.slice();
     this.bottomRevealed = true;
     this._log(
-      `无人亮主，开底牌定主：${cardsName(pool)}，${SUIT_NAMES[trigger.s]} 成为主花色，${this.seats[0].name} 坐庄`,
+      `无人亮主，开底牌定主：${cardsName(pool)}，${SUIT_NAMES[trigger.s]} 成为主花色，${this.seats[this.dealerSeat].name} 坐庄`,
       'round',
     );
   }
@@ -1041,6 +1083,8 @@ export class Room {
       handCount: hand.length,
       trumpSuit: this.trumpSuit,
       declarerSeat: this.declarerSeat,
+      bankerTeam: this.mode === 'team' ? this.bankerTeam : null,
+      dealerSeat: this.mode === 'team' ? this.dealerSeat : null,
       bidValue: this.bidValue,
       turn: this.turn,
       deadline: this.deadline,

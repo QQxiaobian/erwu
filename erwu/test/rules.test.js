@@ -386,6 +386,54 @@ test('底牌不能扣分牌（5、10、K）', () => {
   assert.equal(room.state, 'playing');
 });
 
+test('队家模式：发牌前按顺序轮换庄家', () => {
+  const room = newRoom('team', 4);
+  room.startRound('u0');
+  assert.equal(room.bankerTeam, 0);
+  assert.equal(room.dealerSeat, 0, '第一局由一队座位 0 坐庄');
+  assert.equal(room.declarerSeat, 0, '庄家在发牌时即确定');
+
+  // 庄家队守庄成功 → 换成同队队友
+  room.state = 'finished';
+  room.result = { mode: 'team', declarerSeat: 0, winnerSide: 'declarer', sides: [] };
+  room.startRound('u0');
+  assert.equal(room.bankerTeam, 0);
+  assert.equal(room.dealerSeat, 2, '守庄成功则庄家换成队友');
+
+  // 常家上庄 → 庄家队换成常家，从原庄家下家开始取常家队员
+  room.state = 'finished';
+  room.result = { mode: 'team', declarerSeat: 2, winnerSide: 'defenders', sides: [] };
+  room.startRound('u0');
+  assert.equal(room.bankerTeam, 1);
+  assert.equal(room.dealerSeat, 3, '常家上庄后由原庄家下家坐庄');
+
+  // 常家连续上庄 → 继续在场内按座位顺序轮换
+  room.state = 'finished';
+  room.result = { mode: 'team', declarerSeat: 3, winnerSide: 'defenders', sides: [] };
+  room.startRound('u0');
+  assert.equal(room.bankerTeam, 0);
+  assert.equal(room.dealerSeat, 0);
+});
+
+test('队家模式：亮主只决定主花色，不改变庄家', () => {
+  const room = newRoom('team', 4);
+  room.startRound('u0');
+  assert.equal(room.dealerSeat, 0);
+  // 优先让非庄家的座位亮主
+  const idx = [1, 2, 3].find((i) => room.seats[i].hand.some((x) => x.r === '2'));
+  if (idx !== undefined) {
+    const two = room.seats[idx].hand.find((x) => x.r === '2');
+    assert.ok(room.declare(`u${idx}`, [two.id]).ok);
+    assert.equal(room.trumpSuit, two.s);
+    assert.equal(room.declarerSeat, 0, '亮主者不坐庄，庄家仍为 0 号位');
+  } else {
+    declareFirst(room);
+  }
+  room._finalizeDeclaration();
+  assert.equal(room.state, 'burying');
+  assert.equal(room.declarerSeat, 0);
+});
+
 test('队家模式：首轮无人亮主重发，再次无人亮主开底牌定主', () => {
   const room = newRoom('team', 4);
   room.startRound('u0');
