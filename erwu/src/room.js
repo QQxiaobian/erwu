@@ -409,6 +409,12 @@ export class Room {
     const seat = this.seats[this.declarerSeat];
     seat.hand.push(...this.bottomPool);
     this.bottomPool = [];
+    // 拿底牌后重新整理：噶点未定主用 sortBySuit，其他模式用 sortHand
+    if (this.mode === 'ga' && !this.trumpSuit) {
+      seat.hand = sortBySuit(seat.hand);
+    } else {
+      seat.hand = sortHand(seat.hand, this.trumpSuit);
+    }
     this._log(`${seat.name} 拿起 6 张底牌，正在扣底`, 'info');
   }
 
