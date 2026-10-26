@@ -227,6 +227,14 @@ function newRoom(mode, n) {
   return room;
 }
 
+function buryIds(room, seat) {
+  // 底牌不能扣分牌，优先挑不带分的牌
+  const hand = room.seats[seat].hand;
+  const plain = hand.filter((x) => cardPoints(x) === 0);
+  const rest = hand.filter((x) => cardPoints(x) > 0);
+  return [...plain, ...rest].slice(0, 6).map((x) => x.id);
+}
+
 function autoPlayOut(room) {
   let guard = 0;
   while (room.state === 'playing') {
@@ -327,7 +335,7 @@ test('噶点模式：全员过牌一直重发，不保底', () => {
   }
   assert.equal(room.bidValue, 60);
   assert.equal(room.declarerSeat, seat);
-  room.bury(`u${seat}`, 'H', room.seats[seat].hand.slice(0, 6).map((x) => x.id));
+  room.bury(`u${seat}`, 'H', buryIds(room, seat));
   assert.equal(room.state, 'playing');
   autoPlayOut(room);
   assert.equal(room.state, 'finished');
@@ -360,6 +368,24 @@ test('抓底牌后底牌对所有玩家公开', () => {
   }
 });
 
+test('底牌不能扣分牌（5、10、K）', () => {
+  const room = newRoom('grab', 4);
+  room.startRound('u0');
+  declareFirst(room);
+  room._finalizeDeclaration();
+  assert.equal(room.state, 'burying');
+  const hand = room.seats[room.declarerSeat].hand;
+  const point = hand.find((x) => cardPoints(x) > 0);
+  assert.ok(point, '手里应有分牌');
+  const plainIds = hand.filter((x) => cardPoints(x) === 0).slice(0, 5).map((x) => x.id);
+  const bad = room.bury(`u${room.declarerSeat}`, 'H', [...plainIds, point.id]);
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /不能扣分牌/);
+  const good = room.bury(`u${room.declarerSeat}`, 'H', buryIds(room, room.declarerSeat));
+  assert.ok(good.ok, good.error);
+  assert.equal(room.state, 'playing');
+});
+
 test('队家模式：首轮无人亮主重发，再次无人亮主开底牌定主', () => {
   const room = newRoom('team', 4);
   room.startRound('u0');
@@ -381,7 +407,7 @@ test('队家模式：首轮无人亮主重发，再次无人亮主开底牌定�
     const best = room.bottomPickup.reduce((a, b) => (power(a, null) >= power(b, null) ? a : b));
     assert.equal(room.trumpSuit, best.s, '无 2 时底牌最大一张的花色定主');
   }
-  room.bury('u0', room.trumpSuit, room.seats[0].hand.slice(0, 6).map((x) => x.id));
+  room.bury('u0', room.trumpSuit, buryIds(room, 0));
   assert.equal(room.state, 'playing');
   autoPlayOut(room);
   assert.equal(room.state, 'finished');

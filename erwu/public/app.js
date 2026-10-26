@@ -909,10 +909,11 @@ function phaseBurying(r) {
           `<button class="btn small ${state.burySuit === s ? 'primary' : 'ghost'}" data-action="suit" data-suit="${s}">${SUIT_SYM[s]} ${SUIT_NAME[s]}</button>`,
       ).join('');
   const count = state.selected.size;
-  const canBury = count === 6 && !!state.burySuit;
+  const hasPoint = selectedCards().some((c) => cardPoints(c) > 0);
+  const canBury = count === 6 && !!state.burySuit && !hasPoint;
   return `<div>
       <div class="phase-title">扣底</div>
-      <div class="phase-desc">${fixed ? '主花色已确定。' : '选择本局主花色，'}在手牌中选中 6 张扣入底牌（已选 ${count}/6）。</div>
+      <div class="phase-desc">${fixed ? '主花色已确定。' : '选择本局主花色，'}在手牌中选中 6 张扣入底牌（已选 ${count}/6）。底牌不能扣 5、10、K 等分牌。</div>
     </div>
     <div class="phase-actions">${suitBtns}
       <button class="btn small ghost" data-action="clear">清空</button>
@@ -1063,9 +1064,16 @@ function toggleCard(id) {
   if (state.selected.has(id)) {
     state.selected.delete(id);
   } else {
-    if (r.state === 'burying' && state.selected.size >= 6) {
-      toast('底牌只能扣 6 张', 'error');
-      return;
+    if (r.state === 'burying') {
+      if (state.selected.size >= 6) {
+        toast('底牌只能扣 6 张', 'error');
+        return;
+      }
+      const card = (r.hand || []).find((c) => c.id === id);
+      if (card && cardPoints(card) > 0) {
+        toast('底牌不能扣分牌（5、10、K）', 'error');
+        return;
+      }
     }
     state.selected.add(id);
   }

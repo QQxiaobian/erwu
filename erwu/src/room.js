@@ -573,6 +573,11 @@ export class Room {
     if (ids.length !== 6) return { ok: false, error: '必须扣 6 张底牌' };
     const cards = ids.map((id) => seat.hand.find((c) => c.id === id)).filter(Boolean);
     if (cards.length !== 6) return { ok: false, error: '扣底牌不在手中' };
+    // 底牌不许扣分牌（5、10、K），所有模式统一限制
+    const pointCards = cards.filter((c) => cardPoints(c) > 0);
+    if (pointCards.length) {
+      return { ok: false, error: `底牌不能扣分牌（5、10、K），请换掉 ${cardsName(pointCards)}` };
+    }
     const idSet = new Set(ids);
     seat.hand = seat.hand.filter((c) => !idSet.has(c.id));
     this.trumpSuit = suit;
