@@ -276,6 +276,25 @@ for (const mode of ['grab', 'team']) {
   }
 }
 
+test('金鸡首出后系统自动为其余玩家跟牌', () => {
+  const room = newRoom('grab', 4);
+  room.startRound('u0');
+  room.state = 'playing';
+  room.trumpSuit = 'H';
+  room.turn = 0;
+  room.trick = { lead: null, plays: [] };
+  room.seats[0].hand = [c('BJ'), c('LJ'), c('C3'), c('D4')];
+  for (let i = 1; i < 4; i++) room.seats[i].hand = [c('HA'), c('H2'), c('SK'), c('C9')];
+  const res = room.play('u0', ['BJ', 'LJ']);
+  assert.ok(res.ok, res.error);
+  assert.equal(room.trick.lead.type, 'joker');
+  assert.equal(room.trick.plays.length, 4, '其余玩家应被系统自动跟牌');
+  for (let i = 1; i < 4; i++) {
+    assert.equal(room.trick.plays[i].cards.length, 2, '每人自动跟 2 张主牌');
+    assert.ok(room.trick.plays[i].cards.every((x) => isTrump(x, 'H')));
+  }
+});
+
 test('噶点模式：全员过牌一直重发，不保底', () => {
   const room = newRoom('ga', 4);
   room.startRound('u0');

@@ -169,20 +169,25 @@ function seatName(seatIdx) {
   return s && !s.empty ? s.name : '—';
 }
 
-function describeSelection(cards, trumpSuit) {
+function describeSelection(cards, trumpSuit, lead) {
   if (!cards.length) return '未选择';
   if (cards.length === 1) return '单张';
-  if (cards.length === 2) {
-    const jokers = cards.filter((c) => c.s === 'J').length;
-    if (jokers === 2) return '金鸡';
-    if (cards[0].s === cards[1].s) {
-      const ranks = cards.map((c) => c.r).sort();
-      if (ranks[0] === '2' && ranks[1] === '5') return '25 组合';
-    }
+  const jokers = cards.filter((c) => c.s === 'J').length;
+  if (jokers === 2 && cards.length === 2) return '金鸡';
+  if (cards.length === 2 && cards[0].s === cards[1].s) {
+    const ranks = cards.map((c) => c.r).sort();
+    if (ranks[0] === '2' && ranks[1] === '5') return '25 组合';
+  }
+  const allTrump = cards.every((c) => isTrumpC(c, trumpSuit));
+  if (lead) {
+    // 跟牌阶段：主牌可以毙甩牌，副牌按张数跟
+    if (lead.type === 'throw' && allTrump) return `主牌毙牌 ${cards.length} 张`;
+    if (allTrump) return `主牌 ${cards.length} 张`;
+    return `跟牌 ${cards.length} 张`;
   }
   const sameSuit = cards.every((c) => c.s === cards[0].s && c.s !== 'J');
-  const noTrump = cards.every((c) => !isTrumpC(c, trumpSuit));
-  if (sameSuit && noTrump) return `副牌甩牌 ${cards.length} 张`;
+  if (sameSuit && !allTrump) return `副牌甩牌 ${cards.length} 张`;
+  if (allTrump) return `主牌 ${cards.length} 张（主牌不能甩牌）`;
   return '组合不合法';
 }
 
@@ -913,7 +918,7 @@ function phasePlaying(r) {
     ? `轮到你${lead ? '跟牌' : '首出'}${lead ? `（首出：${LEAD_NAME[lead.type] || ''}）` : ''}，已选 ${n} 张。`
     : `等待 ${esc(seatName(r.turn))} 出牌…`;
   const actions = myTurn
-    ? `<span class="chip gold">${describeSelection(selectedCards(), r.trumpSuit)}</span>
+    ? `<span class="chip gold">${describeSelection(selectedCards(), r.trumpSuit, lead)}</span>
       <button class="btn small ghost" data-action="clear">清空</button>
       <button class="btn small primary" data-action="play">出牌${n ? ` (${n})` : ''}</button>`
     : `<span class="phase-countdown" data-deadline="${r.deadline || ''}"></span>`;

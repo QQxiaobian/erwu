@@ -667,6 +667,16 @@ export class Room {
       this.turn = (seatIdx + 1) % this.maxSeats;
       this.deadline = Date.now() + this._delayFor(this.turn, TURN_MS);
     }
+
+    // 金鸡（大小王）首出：其余玩家由系统自动跟牌，玩家无需操作
+    if (!hasLead && this.trick.lead.type === 'joker') {
+      this._log('金鸡首出，系统自动为其余玩家跟牌', 'info');
+      for (let i = 1; i < this.maxSeats; i++) {
+        if (this.trick.plays.length >= this.maxSeats) break;
+        const next = (seatIdx + i) % this.maxSeats;
+        if (!this._autoPlay(next).ok) break;
+      }
+    }
     this._touch();
     return { ok: true, note };
   }
