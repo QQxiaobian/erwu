@@ -16,6 +16,7 @@ import {
   cardsName,
   autoSelect,
 } from './game/cards.js';
+import { cardCounterEnabled } from './db.js';
 
 export const MODE_INFO = {
   grab: { name: '抢庄模式', seats: [3, 4], desc: '亮 2 定主，25 反主，一人坐庄' },
@@ -65,6 +66,7 @@ export class Room {
     this.turn = null;
     this.result = null;
     this.onRoundEnd = null;
+    this.playedCards = [];
 
     this.botSeq = 0;
     this.botPassed = new Set();
@@ -275,6 +277,7 @@ export class Room {
     this.pendingResolveAt = null;
     this.turn = null;
     this.result = null;
+    this.playedCards = [];
     this.deadline = null;
   }
 
@@ -649,6 +652,9 @@ export class Room {
       at: now,
     };
     this._log(`${this.seats[winner].name} 赢得本墩${points ? `，获得 ${points} 分` : ''}`, 'trick');
+    for (const p of this.trick.plays) {
+      for (const c of p.cards) this.playedCards.push(c.id);
+    }
     this.trick = { lead: null, plays: [] };
     this.pendingResolveAt = null;
     this.turn = winner;
@@ -968,6 +974,8 @@ export class Room {
         (this.hostId === userId || hostGone) &&
         (this.state === 'waiting' || this.state === 'finished') &&
         this.full,
+      playedCards: this.playedCards,
+      cardCounter: cardCounterEnabled(),
       log: this.log.slice(-40),
     };
   }

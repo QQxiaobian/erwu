@@ -21,6 +21,21 @@ const STATE_NAME = {
 };
 const LEAD_NAME = { single: '单张', combo25: '25 组合', joker: '金鸡', throw: '副牌甩牌' };
 
+// 前端牌堆：与后端 cards.js 保持一致（54 张）
+const CC_RANKS = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '4', '3'];
+function makeDeck() {
+  const deck = [];
+  for (const s of SUITS) {
+    for (const r of CC_RANKS) deck.push({ id: s + r, s, r });
+    deck.push({ id: s + '5', s, r: '5' });
+    deck.push({ id: s + '2', s, r: '2' });
+  }
+  deck.push({ id: 'BJ', s: 'J', r: 'BJ' });
+  deck.push({ id: 'LJ', s: 'J', r: 'SJ' });
+  return deck;
+}
+const FULL_DECK = makeDeck();
+
 const state = {
   user: null,
   ws: null,
@@ -39,7 +54,10 @@ const state = {
   adminUsers: null,
   adminStats: null,
   adminHistory: null,
+  adminSettings: null,
   adminTab: 'users',
+  allowRegister: true,
+  cardCounter: false,
   wsRetry: null,
 };
 
@@ -239,6 +257,8 @@ function handleMessage(msg) {
       state.rooms = msg.rooms || [];
       state.onlineCount = msg.onlineCount || 0;
       state.onlineUsers = msg.onlineUsers || [];
+      if (typeof msg.allowRegister === 'boolean') state.allowRegister = msg.allowRegister;
+      if (typeof msg.cardCounter === 'boolean') state.cardCounter = msg.cardCounter;
       applyUser();
       if (msg.room) {
         onRoom(msg.room);
@@ -474,9 +494,64 @@ function renderTable() {
   renderPhase();
   renderHand();
   renderResultOverlay();
+  renderCardCounter();
+
+  // 记牌器按钮：仅当管理员开放且牌局进行中显示
+  const ccBtn = $('#card-counter-btn');
+  if (ccBtn) ccBtn.classList.toggle('hidden', !r.cardCounter || r.state === 'waiting');
 
   const waiting = r.state === 'waiting';
   $('#hand-area').classList.toggle('hidden', waiting);
+}
+
+/* ---------------- 记牌器 ---------------- */
+function renderCardCounter() {
+  const r = state.room;
+  const overlay = $('#card-counter-overlay');
+  if (!r || !r.cardCounter || r.state === 'waiting') {
+    if (!overlay.classList.contains('hidden')) overlay.classList.add('hidden');
+    return;
+  }
+  const played = new Set(r.playedCards || []);
+  const trump = r.trumpSuit;
+  const groups = [];
+  // 常主区：所有 5、所有 2、大小王
+  const permRows = [
+    { label: '5', cards: FULL_DECK.filter((c) => c.r === '5') },
+    { label: '2', cards: FULL_DECK.filter((c) => c.r === '2') },
+  ];
+  const jokers = FULL_DECK.filter((c) => c.s === 'J');
+  let permTiles = '';
+  for (const row of permRows) {
+    permTiles += row.cards.map((c) => ccTile(c, played, trump)).join('');
+  }
+  permTiles += jokers.map((c) => ccTile(c, played, trump)).join('');
+  const permRemain = [...FULL_DECK.filter((c) => c.r === '5' || c.r === '2' || c.s === 'J')].filter((c) => !played.has(c.id)).length;
+  groups.push(`<div class="cc-row"><div class="cc-row-label">常主</div><div class="cc-tiles">${permTiles}</div><div class="cc-remain">剩 ${permRemain}</div></div>`);
+
+  // 各花色副牌区（按花色分组）
+  for (const s of SUITS) {
+    const cards = FULL_DECK.filter((c) => c.s === s && c.r !== '5' && c.r !== '2');
+    const tiles = cards.map((c) => ccTile(c, played, trump)).join('');
+    const remain = cards.filter((c) => !played.has(c.id)).length;
+    const isTrump = s === trump;
+    groups.push(`<div class="cc-row ${isTrump ? 'trump-suit' : ''}"><div class="cc-row-label ${s === 'H' || s === 'D' ? 'red' : ''}">${SUIT_SYM[s]}</div><div class="cc-tiles">${tiles}</div><div class="cc-remain">剩 ${remain}</div></div>`);
+  }
+
+  const totalRemain = FULL_DECK.filter((c) => !played.has(c.id)).length;
+  $('#cc-sub').textContent = `已出 ${played.size} / 54 · 剩余 ${totalRemain} 张`;
+  $('#cc-body').innerHTML = groups.join('');
+}
+
+function ccTile(card, played, trump) {
+  const isJoker = card.s === 'J';
+  const isRed = card.s === 'H' || card.s === 'D' || card.r === 'BJ';
+  const isTrump = trump ? isTrumpC(card, trump) : false;
+  const isOut = played.has(card.id);
+  const cls = ['cc-tile', isRed ? 'red' : 'black', isJoker ? 'joker' : '', isTrump ? 'trump' : '', isOut ? 'out' : ''].filter(Boolean).join(' ');
+  const label = isJoker ? (card.r === 'BJ' ? '大王' : '小王') : card.r;
+  const sym = isJoker ? '' : SUIT_SYM[card.s];
+  return `<div class="${cls}" title="${isJoker ? label : SUIT_SYM[card.s] + card.r}${isOut ? '（已出）' : ''}"><span class="cc-rank">${label}</span><span class="cc-sym">${sym}</span></div>`;
 }
 
 function renderFelt() {
@@ -1031,14 +1106,16 @@ async function openAdmin() {
 }
 
 async function refreshAdmin() {
-  const [u, s, h] = await Promise.all([
+  const [u, s, h, st] = await Promise.all([
     api('/api/admin/users'),
     api('/api/admin/stats'),
     api('/api/admin/history'),
+    api('/api/admin/settings'),
   ]);
   state.adminUsers = u.users;
   state.adminStats = s;
   state.adminHistory = h.history;
+  state.adminSettings = st.settings;
   renderAdmin();
 }
 
@@ -1047,6 +1124,7 @@ function renderAdmin() {
   const stats = state.adminStats || {};
   const tabs = `<div class="admin-tabs">
     <button class="admin-tab ${state.adminTab === 'users' ? 'active' : ''}" data-admin-tab="users">账号管理</button>
+    <button class="admin-tab ${state.adminTab === 'settings' ? 'active' : ''}" data-admin-tab="settings">功能设置</button>
     <button class="admin-tab ${state.adminTab === 'history' ? 'active' : ''}" data-admin-tab="history">对局记录</button>
   </div>`;
   const statHTML = `<div class="admin-stats">
@@ -1065,6 +1143,34 @@ function renderAdmin() {
       )
       .join('');
     body.innerHTML = `${statHTML}${tabs}<div class="history-list">${list || '<div class="phase-desc">暂无对局记录</div>'}</div>`;
+    return;
+  }
+
+  if (state.adminTab === 'settings') {
+    const st = state.adminSettings || {};
+    body.innerHTML = `${statHTML}${tabs}
+      <div class="settings-list">
+        <label class="setting-row">
+          <div>
+            <div class="setting-title">开放用户注册</div>
+            <div class="setting-desc">关闭后，新玩家只能由管理员在「账号管理」中创建账号。</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" data-admin-action="setting" data-key="allowRegister" ${st.allowRegister ? 'checked' : ''}>
+            <span class="slider"></span>
+          </label>
+        </label>
+        <label class="setting-row">
+          <div>
+            <div class="setting-title">开放记牌器</div>
+            <div class="setting-desc">开启后，牌桌内显示记牌器，可查看每种牌已出/剩余数量。</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" data-admin-action="setting" data-key="cardCounter" ${st.cardCounter ? 'checked' : ''}>
+            <span class="slider"></span>
+          </label>
+        </label>
+      </div>`;
     return;
   }
 
@@ -1110,10 +1216,18 @@ function renderAdmin() {
 }
 
 async function handleAdminAction(action, el) {
-  const id = el.dataset.id;
-  const user = (state.adminUsers || []).find((u) => u.id === id);
-  if (!user) return;
   try {
+    if (action === 'setting') {
+      const key = el.dataset.key;
+      const value = el.checked;
+      await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ [key]: value }) });
+      toast(`${value ? '已开启' : '已关闭'}`, 'good');
+      await refreshAdmin();
+      return;
+    }
+    const id = el.dataset.id;
+    const user = (state.adminUsers || []).find((u) => u.id === id);
+    if (!user) return;
     if (action === 'reset') {
       const pwd = prompt(`为「${user.nickname || user.username}」设置新密码（至少 4 位）`);
       if (!pwd) return;
@@ -1245,6 +1359,10 @@ function bind() {
   $('#refresh-rooms').addEventListener('click', () => send({ t: 'rooms.list' }));
   $('#open-rules-btn').addEventListener('click', () => $('#rules-overlay').classList.remove('hidden'));
   $('#table-rules-btn').addEventListener('click', () => $('#rules-overlay').classList.remove('hidden'));
+  $('#card-counter-btn').addEventListener('click', () => {
+    renderCardCounter();
+    $('#card-counter-overlay').classList.remove('hidden');
+  });
   $('#open-admin-btn').addEventListener('click', openAdmin);
   $('#table-leave').addEventListener('click', () => handleAction('leave'));
 

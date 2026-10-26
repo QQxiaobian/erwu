@@ -5,10 +5,44 @@ import crypto from 'node:crypto';
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-let db = { users: [], history: [], createdAt: Date.now() };
+let db = { users: [], history: [], settings: {}, createdAt: Date.now() };
 
 function ensureDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// 系统设置：可由管理员在后台修改
+export function getSettings() {
+  if (!db.settings) db.settings = {};
+  return db.settings;
+}
+
+export function setSetting(key, value) {
+  if (!db.settings) db.settings = {};
+  db.settings[key] = value;
+  saveDb();
+  return db.settings;
+}
+
+// 是否允许自助注册（环境变量为默认值，管理员可在后台覆盖）
+export function allowRegister() {
+  const s = getSettings();
+  if (typeof s.allowRegister === 'boolean') return s.allowRegister;
+  return String(process.env.ALLOW_REGISTER ?? '1') !== '0';
+}
+
+// 是否开放记牌器（环境变量为默认值，管理员可在后台覆盖）
+export function cardCounterEnabled() {
+  const s = getSettings();
+  if (typeof s.cardCounter === 'boolean') return s.cardCounter;
+  return String(process.env.CARD_COUNTER ?? '1') !== '0';
+}
+
+export function publicSettings() {
+  return {
+    allowRegister: allowRegister(),
+    cardCounter: cardCounterEnabled(),
+  };
 }
 
 export function loadDb() {
@@ -19,11 +53,12 @@ export function loadDb() {
       db = {
         users: Array.isArray(raw.users) ? raw.users : [],
         history: Array.isArray(raw.history) ? raw.history : [],
+        settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : {},
         createdAt: raw.createdAt || Date.now(),
       };
     } catch (e) {
       console.error('读取 data/db.json 失败，使用空数据库:', e.message);
-      db = { users: [], history: [], createdAt: Date.now() };
+      db = { users: [], history: [], settings: {}, createdAt: Date.now() };
     }
   }
   seedAdmin();

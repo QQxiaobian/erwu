@@ -329,20 +329,23 @@ export function resolveTrick(lead, plays, trumpSuit) {
   return lead.seat;
 }
 
+// 常主判定（不依赖主花色）：5、2、大小王
+export function isPermanentTrump(card) {
+  if (!card) return false;
+  return card.s === 'J' || card.r === '5' || card.r === '2';
+}
+
 export function sortHand(cards, trumpSuit) {
   return cards.slice().sort((a, b) => {
-    const at = isTrump(a, trumpSuit);
-    const bt = isTrump(b, trumpSuit);
-    if (at !== bt) return at ? -1 : 1;
-    if (at) {
-      const ap = power(a, trumpSuit);
-      const bp = power(b, trumpSuit);
-      if (ap !== bp) return bp - ap;
-      return a.s.localeCompare(b.s);
-    }
-    const suitOrder = { S: 0, H: 1, C: 2, D: 3, J: 4 };
-    if (a.s !== b.s) return suitOrder[a.s] - suitOrder[b.s];
-    return rankIndex(b.r) - rankIndex(a.r);
+    // 分组：0=常主(5/2/王) 永远最左；1=主花色普通牌；2=副牌
+    const group = (c) => (isPermanentTrump(c) ? 0 : c.s === trumpSuit ? 1 : 2);
+    const ag = group(a);
+    const bg = group(b);
+    if (ag !== bg) return ag - bg;
+    const ap = power(a, trumpSuit);
+    const bp = power(b, trumpSuit);
+    if (ap !== bp) return bp - ap;
+    return a.s.localeCompare(b.s);
   });
 }
 

@@ -16,6 +16,10 @@ import {
   listHistory,
   publicUser,
   stats,
+  allowRegister,
+  cardCounterEnabled,
+  setSetting,
+  publicSettings,
 } from './src/db.js';
 import {
   attachUser,
@@ -29,7 +33,6 @@ import { Hub } from './src/hub.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const ALLOW_REGISTER = String(process.env.ALLOW_REGISTER ?? '1') !== '0';
 
 loadDb();
 
@@ -54,11 +57,11 @@ function tooMany(ip) {
 app.get('/api/health', (req, res) => res.json({ ok: true, time: Date.now() }));
 
 app.get('/api/me', (req, res) => {
-  res.json({ user: publicUser(req.user), allowRegister: ALLOW_REGISTER });
+  res.json({ user: publicUser(req.user), ...publicSettings() });
 });
 
 app.post('/api/register', (req, res) => {
-  if (!ALLOW_REGISTER) return res.status(403).json({ error: '管理员已关闭自助注册' });
+  if (!allowRegister()) return res.status(403).json({ error: '管理员已关闭自助注册' });
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   if (tooMany(ip)) return res.status(429).json({ error: '尝试过于频繁，请稍后再试' });
   const { username, password, nickname } = req.body || {};
@@ -147,6 +150,17 @@ app.get('/api/admin/history', requireAdmin, (req, res) => {
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
   res.json({ ...stats(), online: hub.onlineCount() });
+});
+
+app.get('/api/admin/settings', requireAdmin, (req, res) => {
+  res.json({ settings: publicSettings() });
+});
+
+app.post('/api/admin/settings', requireAdmin, (req, res) => {
+  const body = req.body || {};
+  if (typeof body.allowRegister === 'boolean') setSetting('allowRegister', body.allowRegister);
+  if (typeof body.cardCounter === 'boolean') setSetting('cardCounter', body.cardCounter);
+  res.json({ settings: publicSettings() });
 });
 
 // ---------- 静态页面 ----------

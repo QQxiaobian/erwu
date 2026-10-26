@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { MODE_INFO, Room } from './room.js';
 import { verifyToken, parseCookies } from './auth.js';
-import { findById, recordMatch, publicUser } from './db.js';
+import { findById, recordMatch, publicUser, cardCounterEnabled, allowRegister } from './db.js';
 
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -65,6 +65,8 @@ export class Hub {
       rooms: this.roomList(),
       onlineCount: this.onlineCount(),
       onlineUsers: this.onlineUsers(),
+      allowRegister: allowRegister(),
+      cardCounter: cardCounterEnabled(),
       room: inRoom ? inRoom.viewFor(user.id) : null,
     });
 
