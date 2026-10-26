@@ -360,16 +360,36 @@ export function sortBySuit(cards) {
 }
 
 export function sortHand(cards, trumpSuit) {
+  const suitOrder = { J: 0, S: 1, H: 2, C: 3, D: 4 };
   return cards.slice().sort((a, b) => {
     // 分组：0=常主(5/2/王) 永远最左；1=主花色普通牌；2=副牌
     const group = (c) => (isPermanentTrump(c) ? 0 : c.s === trumpSuit ? 1 : 2);
     const ag = group(a);
     const bg = group(b);
     if (ag !== bg) return ag - bg;
-    const ap = power(a, trumpSuit);
-    const bp = power(b, trumpSuit);
-    if (ap !== bp) return bp - ap;
-    return a.s.localeCompare(b.s);
+
+    if (ag === 0) {
+      // 常主：王 > 5 > 2；同点数按花色 S/H/C/D 排
+      const rankGroup = (c) => (c.s === 'J' ? 0 : c.r === '5' ? 1 : 2);
+      const ga = rankGroup(a);
+      const gb = rankGroup(b);
+      if (ga !== gb) return ga - gb;
+      return (suitOrder[a.s] ?? 5) - (suitOrder[b.s] ?? 5);
+    }
+
+    if (ag === 1) {
+      // 主花色普通牌：按牌力从大到小
+      const ap = power(a, trumpSuit);
+      const bp = power(b, trumpSuit);
+      if (ap !== bp) return bp - ap;
+      return a.r.localeCompare(b.r);
+    }
+
+    // 副牌：按花色分组，花色内按点数从大到小
+    const sa = suitOrder[a.s] ?? 5;
+    const sb = suitOrder[b.s] ?? 5;
+    if (sa !== sb) return sa - sb;
+    return RANKS.indexOf(b.r) - RANKS.indexOf(a.r);
   });
 }
 
