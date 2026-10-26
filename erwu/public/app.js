@@ -500,6 +500,7 @@ function renderTable() {
   }
 
   renderFelt();
+  renderBottomBar();
   renderScoreboard();
   renderLog();
   renderPhase();
@@ -714,21 +715,27 @@ function centerHTML() {
     foot = `${r.result.detail}`;
   }
 
-  // 抓底牌后公开的 6 张底牌：所有玩家可见
-  let bottomRow = '';
-  if (r.bottomRevealed && r.state !== 'finished' && Array.isArray(r.bottom) && r.bottom.length) {
-    const cards = r.bottom.map((c) => cardHTML(c, { mini: true, trumpSuit: r.trumpSuit })).join('');
-    bottomRow = `<div class="bottom-reveal">
-      <span class="br-label">底牌公开</span>
-      <div class="play-cards br-cards">${cards}</div>
-    </div>`;
-  }
-
   return `${trumpBadge}
     <div class="center-status">${status}</div>
     <div class="trick-zone">${groups}</div>
-    ${bottomRow}
     <div class="center-foot">${foot}</div>`;
+}
+
+// 抓底牌后公开的 6 张底牌（所有玩家可见），显示在牌桌下方
+function renderBottomBar() {
+  const r = state.room;
+  const bar = $('#bottom-bar');
+  const visible = r && r.bottomRevealed && r.state !== 'finished' && r.state !== 'waiting' && Array.isArray(r.bottom) && r.bottom.length;
+  if (!visible) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  const cards = r.bottom.map((c) => cardHTML(c, { mini: true, trumpSuit: r.trumpSuit })).join('');
+  bar.innerHTML = `<span class="bb-label">底牌公开</span>
+    <div class="play-cards bb-cards">${cards}</div>
+    <span class="bb-note">庄家抓起的 6 张底牌，所有人可见</span>`;
+  bar.classList.remove('hidden');
 }
 
 function renderScoreboard() {

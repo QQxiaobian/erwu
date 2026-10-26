@@ -636,20 +636,38 @@ button, input, select { font: inherit; }
 .play-name.winner { color: var(--gold-bright); font-weight: 700; }
 .center-foot { font-size: 11px; color: rgba(147, 169, 157, 0.9); font-family: ui-monospace, Menlo, monospace; }
 
-/* 抓底后公开的底牌 */
-.bottom-reveal {
+/* 抓底后公开的底牌：牌桌下方独立一条，避免被座位卡遮挡 */
+.bottom-bar {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 14px;
+  margin: 2px 8px 4px;
+  border-radius: 10px;
+  background: rgba(6, 22, 16, 0.6);
+  border: 1px solid rgba(217, 180, 95, 0.2);
 }
-.bottom-reveal .br-label {
+.bottom-bar.hidden { display: none; }
+.bottom-bar .bb-label {
   font-size: 10px;
-  letter-spacing: 0.18em;
-  color: rgba(217, 180, 95, 0.85);
+  letter-spacing: 0.16em;
+  color: rgba(217, 180, 95, 0.9);
+  white-space: nowrap;
 }
-.bottom-reveal .br-cards .card { opacity: 0.92; }
+.bottom-bar .bb-note { font-size: 10.5px; color: var(--muted); }
+.bottom-bar .bb-cards .card {
+  width: 34px;
+  height: 48px;
+  border-radius: 5px;
+  margin-left: -16px;
+}
+.bottom-bar .bb-cards .card:first-child { margin-left: 0; }
+.bottom-bar .bb-cards .card .rank { font-size: 11px; top: 3px; left: 4px; }
+.bottom-bar .bb-cards .card .suit { font-size: 9px; top: 16px; left: 4px; }
+.bottom-bar .bb-cards .card .big-suit { font-size: 16px; right: 4px; bottom: 7px; }
+.bottom-bar .bb-cards .card .points { display: none; }
+.bottom-bar .bb-cards .card .joker-text { font-size: 9px; }
 
 /* 主牌标识 */
 .trump-indicator {
@@ -908,14 +926,14 @@ button, input, select { font: inherit; }
 }
 .card.joker .joker-text {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  right: 5px;
+  bottom: 10px;
   writing-mode: vertical-rl;
   font-family: "Songti SC", "STSong", serif;
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 800;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.06em;
+  opacity: 0.92;
 }
 .card.joker.red .joker-text { color: var(--red); }
 .card.joker.black .joker-text { color: #1a1815; }
@@ -930,7 +948,7 @@ button, input, select { font: inherit; }
 .card.mini .suit { font-size: 10px; top: 18px; left: 4px; }
 .card.mini .big-suit { font-size: 18px; right: 4px; bottom: 9px; }
 .card.mini .points { display: none; }
-.card.mini .joker-text { font-size: 14px; }
+.card.mini .joker-text { font-size: 10px; right: 3px; bottom: 6px; }
 .card.mini:hover { transform: none; }
 .card.back {
   background:
@@ -1407,7 +1425,7 @@ button, input, select { font: inherit; }
   .card .suit { font-size: 10px; top: 18px; left: 4px; }
   .card .big-suit { font-size: 18px; right: 4px; bottom: 10px; }
   .card .points { font-size: 8px; }
-  .card.joker .joker-text { font-size: 15px; }
+  .card.joker .joker-text { font-size: 11px; right: 4px; bottom: 8px; }
   .card.mini { width: 38px; height: 55px; }
   .card.mini .rank { font-size: 11px; }
   .card.mini .big-suit { font-size: 15px; }
