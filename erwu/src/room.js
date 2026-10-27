@@ -17,6 +17,13 @@ import {
   cardsName,
   autoSelect,
 } from './game/cards.js';
+import {
+  choosePlay,
+  chooseDeclaration,
+  chooseBury,
+  chooseBid,
+  bestSuitFor,
+} from './game/ai.js';
 import { cardCounterEnabled } from './db.js';
 
 export const MODE_INFO = {
@@ -640,22 +647,22 @@ export class Room {
     const idx = this.declarerSeat;
     if (idx === null || idx === undefined) return;
     const seat = this.seats[idx];
+    // 噶点：先自选主花色（按手牌选最强的一门），其他模式主花色已定
     let suit = this.trumpSuit;
-    if (this.mode === 'ga') {
-      const counts = {};
-      for (const s of SUITS) counts[s] = 0;
-      for (const c of seat.hand) if (c.s !== 'J') counts[c.s] = (counts[c.s] || 0) + 1;
-      suit = SUITS.slice().sort((a, b) => counts[b] - counts[a])[0];
-    }
+    if (this.mode === 'ga') suit = bestSuitFor(seat.hand);
     if (!suit) suit = 'S';
-    const sorted = seat.hand.slice().sort((a, b) => {
-      const pa = cardPoints(a) > 0 ? 1 : 0;
-      const pb = cardPoints(b) > 0 ? 1 : 0;
-      if (pa !== pb) return pa - pb;
-      return power(a, suit) - power(b, suit);
-    });
-    const ids = sorted.slice(0, 6).map((c) => c.id);
-    this._burySeat(idx, suit, ids, true);
+    const ids = chooseBury(seat.hand, suit);
+    const res = this._burySeat(idx, suit, ids, true);
+    if (!res.ok) {
+      // 兜底：按分数优先 + 牌力最低挑 6 张
+      const sorted = seat.hand.slice().sort((a, b) => {
+        const pa = cardPoints(a) > 0 ? 1 : 0;
+        const pb = cardPoints(b) > 0 ? 1 : 0;
+        if (pa !== pb) return pa - pb;
+        return power(a, suit) - power(b, suit);
+      });
+      this._burySeat(idx, suit, sorted.slice(0, 6).map((c) => c.id), true);
+    }
   }
 
   play(userId, cardIds) {
@@ -730,7 +737,24 @@ export class Room {
 
   _autoPlay(seatIdx) {
     const seat = this.seats[seatIdx];
-    const picked = autoSelect(seat.hand, this.trick.lead, this.trumpSuit);
+    // 给 AI 提供公开信息（当前墩、已出牌、各座位、阵营），由 AI 自主决定
+    const ctx = {
+      seat: seatIdx,
+      maxSeats: this.maxSeats,
+      mode: this.mode,
+      declarerSeat: this.declarerSeat,
+      plays: this.trick.plays,
+      played: this.playedCards,
+      pickup: this.bottomPickup,
+    };
+    let picked;
+    try {
+      picked = choosePlay(seat.hand, this.trick.lead, this.trumpSuit, ctx);
+    } catch (e) {
+      console.error('AI 决策异常，回退到托管选牌', e);
+      picked = autoSelect(seat.hand, this.trick.lead, this.trumpSuit);
+    }
+    if (!picked || !picked.length) picked = autoSelect(seat.hand, this.trick.lead, this.trumpSuit);
     const res = this._playSeat(
       seatIdx,
       picked.map((c) => c.id),
@@ -741,6 +765,11 @@ export class Room {
     if (!this.trick.lead && seat.hand.length) {
       const fallback = [seat.hand[0].id];
       return this._playSeat(seatIdx, fallback, true);
+    }
+    if (this.trick.lead) {
+      const fallback = autoSelect(seat.hand, this.trick.lead, this.trumpSuit);
+      const res2 = this._playSeat(seatIdx, fallback.map((c) => c.id), true);
+      if (res2.ok) return res2;
     }
     this._log(`${seat.name} 托管自动出牌失败：${res.error}，等待玩家操作`, 'warn');
     this.deadline = Date.now() + 8000;
@@ -927,48 +956,25 @@ export class Room {
   _botBidTarget(seatIdx) {
     const seat = this.seats[seatIdx];
     if (!seat) return null;
-    let perm = 0;
-    const suitScore = { S: 0, H: 0, C: 0, D: 0 };
-    for (const card of seat.hand) {
-      if (card.s === 'J' || card.r === '5' || card.r === '2') {
-        perm += 1;
-        continue;
-      }
-      const w = card.r === 'A' ? 3 : card.r === 'K' ? 2.5 : card.r === 'Q' ? 1.5 : card.r === '10' ? 1 : 0.5;
-      suitScore[card.s] += w;
-    }
-    const best = Math.max(...SUITS.map((s) => suitScore[s]));
-    const score = perm * 2 + best;
-    const need = this.redeals >= 2 ? 0 : this.redeals === 1 ? 6 : 8;
-    if (score < need) return null;
-    // 叫分必须是 5 的倍数
-    const raw = 55 + (score - need) * 3;
-    return Math.min(95, Math.max(55, Math.round(raw / 5) * 5));
+    return chooseBid(seat.hand, this.redeals);
   }
 
   _actBot() {
     if (this.state === 'declaring') {
-      const bots = this.seats.map((s, i) => ({ s, i })).filter((x) => x.s && x.s.isBot);
-      if (this.declaration && this.declaration.last) {
-        const next = bots.find((x) => !this.botPassed.has(x.i));
-        if (next) {
-          this.botPassed.add(next.i);
-          this.passDeclaration(next.s.userId);
-        }
-        return;
+      const botIdx = this.seats.findIndex((s, i) => s && s.isBot && !this.botPassed.has(i));
+      if (botIdx < 0) return;
+      const seat = this.seats[botIdx];
+      this.botPassed.add(botIdx);
+      // 人机按手牌强度挑最强的一门亮主 / 反主，判断偏弱时过牌
+      const choice = chooseDeclaration(seat.hand, this.trumpSuit, {
+        redeals: this.redeals,
+        mode: this.mode,
+        seat: botIdx,
+      });
+      if (choice && choice.cards && choice.cards.length) {
+        if (this.declare(seat.userId, choice.cards).ok) return;
       }
-      const holder = bots.find((x) => !this.botPassed.has(x.i) && x.s.hand.some((c) => c.r === '2'));
-      if (holder) {
-        const two = holder.s.hand.find((c) => c.r === '2');
-        this.botPassed.add(holder.i);
-        this.declare(holder.s.userId, [two.id]);
-        return;
-      }
-      const next = bots.find((x) => !this.botPassed.has(x.i));
-      if (next) {
-        this.botPassed.add(next.i);
-        this.passDeclaration(next.s.userId);
-      }
+      this.passDeclaration(seat.userId);
       return;
     }
     if (this.state === 'bidding') {
