@@ -51,6 +51,66 @@ npm start
 
 要求 Node.js >= 18。
 
+## 安卓 APP（可选）
+
+仓库自带了一个 Android 原生壳（基于 Capacitor），把前端页面跑在 WebView 里，体验比浏览器更顺手。
+
+### 安装 APK
+
+1. 下载最新的 `app-debug.apk`（从 GitHub Actions Artifacts 或自行构建）
+2. 用微信 / QQ 传到手机，或浏览器下载后安装
+3. 首次启动会弹输入框，填你服务器地址，例如：
+   - **局域网 NAS**：`http://192.168.1.100:3000`
+   - **公网域名**：`https://erwu.yourdomain.com`
+4. 地址保存在本地 SharedPreferences，后续自动连接；菜单里可随时修改
+
+> Android 9+ 默认禁止明文 HTTP。本 APP 已配置 `usesCleartextTraffic=true` + `network_security_config.xml`，局域网 HTTP 可以直接用。如果服务器启用了 HTTPS 更安全，建议搭配 Let's Encrypt 或自签证书使用。
+
+### 主要特性
+
+- 包名 `com.erwu.game`，应用名「二五扑克」
+- 返回键优先在 WebView 内部后退历史，没有历史才退出 App
+- Edge-to-Edge 全屏，状态栏透明，支持刘海屏挖孔屏
+- 仅需 `INTERNET` / `ACCESS_NETWORK_STATE` 权限
+- minSdk 24（Android 7.0），targetSdk 36（Android 16）
+
+### 自行构建 APK
+
+前置依赖：JDK 21+、Android SDK（platforms;android-36 + build-tools;36.0.0）。
+
+```bash
+git clone https://github.com/QQxiaobian/erwu.git
+cd erwu/erwu
+
+# 安装 Capacitor 依赖（首次）
+npm install
+
+# Android SDK / JDK 环境变量
+export ANDROID_HOME=$HOME/Android/Sdk
+export JAVA_HOME=$HOME/.sdkman/candidates/java/21-tem
+
+# 同步前端资源到 Android 工程
+npx cap sync android
+
+# 构建 debug APK（用本地 gradle 或 gradlew）
+cd android
+./gradlew assembleDebug
+# 产物：android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### 构建 Release 签名包（可选）
+
+```bash
+# 1. 生成 keystore（密码请妥善保管，不要提交到仓库）
+keytool -genkey -v -keystore erwu-release.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias erwu
+
+# 2. android/app/build.gradle 添加 signingConfigs，在 buildTypes.release 里引用
+
+# 3. 构建
+./gradlew assembleRelease
+```
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |

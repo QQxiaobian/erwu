@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">二五扑克</string>
+    <string name="title_activity_main">二五扑克</string>
+    <string name="package_name">com.erwu.game</string>
+    <string name="custom_url_scheme">com.erwu.game</string>
+</resources>

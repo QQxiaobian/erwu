@@ -3,3 +3,7 @@ data/
 *.log
 .DS_Store
 .env
+android/app/build/
+android/capacitor-cordova-android-plugins/
+android/local.properties
+android/init.gradle
