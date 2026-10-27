@@ -160,14 +160,13 @@ function enumerateFollow(hand, lead, trumpSuit, ctx) {
     for (const c of pool) out.push([c]);
   } else if (type === 'combo25') {
     const cs = lead.cards[0].s;
-    const sameSuitTrumps = trumps.filter((c) => c.s === cs);
-    if (sameSuitTrumps.length >= 2) {
-      out.push(...allPairs(sameSuitTrumps, trumpSuit));
-    } else if (trumps.length >= 2) {
-      out.push(...allPairs(trumps, trumpSuit));
-    } else if (trumps.length === 1) {
-      const t = trumps[0];
-      for (const c of hand) if (c.id !== t.id) out.push([t, c]);
+    const same = hand.filter((c) => c.s === cs);
+    if (same.length >= 2) {
+      // 跟主 25：有 2 张以上主花色牌时必须跟同花色
+      out.push(...allPairs(same, trumpSuit));
+    } else if (same.length === 1) {
+      // 只有 1 张：必须带出这张，另一张自由选择
+      for (const c of hand) if (c.id !== same[0].id) out.push([same[0], c]);
     } else {
       out.push(...allPairs(hand, trumpSuit));
     }
@@ -328,16 +327,18 @@ function chooseLead(hand, trumpSuit, ctx) {
     cands.push({ cards: [bj, lj], type: 'joker', score });
   }
 
-  // 2) 25 组合：领出基本稳赢，同时消耗对手两张主牌
-  for (const s of SUITS) {
-    const two = hand.find((c) => c.s === s && c.r === '2');
-    const five = hand.find((c) => c.s === s && c.r === '5');
-    if (!two || !five) continue;
-    const myMax = Math.max(power(two, trumpSuit), power(five, trumpSuit));
-    const beaters = countUnseenTrumpsAbove(myMax, handIds, playedIds, trumpSuit);
-    let score = s === trumpSuit ? 26 : 19;
-    if (beaters > 0) score -= Math.min(9, beaters * 2.5);
-    cands.push({ cards: [two, five], type: 'combo25', score });
+  // 2) 主花色 25 组合：领出基本稳赢，同时消耗对手两张主牌
+  // 只有主花色的 2+5 算 25；其他花色的 2+5 都是常主，不能当 25 领出
+  if (trumpSuit) {
+    const two = hand.find((c) => c.s === trumpSuit && c.r === '2');
+    const five = hand.find((c) => c.s === trumpSuit && c.r === '5');
+    if (two && five) {
+      const myMax = Math.max(power(two, trumpSuit), power(five, trumpSuit));
+      const beaters = countUnseenTrumpsAbove(myMax, handIds, playedIds, trumpSuit);
+      let score = 26;
+      if (beaters > 0) score -= Math.min(9, beaters * 2.5);
+      cands.push({ cards: [two, five], type: 'combo25', score });
+    }
   }
 
   // 3) 副牌甩牌：取该花色能安全甩出的最长前缀

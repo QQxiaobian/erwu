@@ -722,17 +722,27 @@ export class Room {
       this.deadline = Date.now() + this._delayFor(this.turn, TURN_MS);
     }
 
-    // 金鸡（大小王）首出：其余玩家由系统自动跟牌，玩家无需操作
-    if (!hasLead && this.trick.lead.type === 'joker') {
-      this._log('金鸡首出，系统自动为其余玩家跟牌', 'info');
-      for (let i = 1; i < this.maxSeats; i++) {
-        if (this.trick.plays.length >= this.maxSeats) break;
-        const next = (seatIdx + i) % this.maxSeats;
-        if (!this._autoPlay(next).ok) break;
-      }
-    }
+    // 金鸡首出：人机 / 掉线托管自动跟牌；真人主牌不足 2 张时必须自己选牌
+    if (this.trick.lead && this.trick.lead.type === 'joker') this._autoFollowJoker();
     this._touch();
     return { ok: true, note };
+  }
+
+  // 金鸡跟牌：只有主牌不足 2 张的在线真人需要手动出牌，其余座位由系统代跟
+  _autoFollowJoker() {
+    if (!this.trick.lead || this.trick.lead.type !== 'joker') return;
+    let guard = 0;
+    while (this.turn !== null && this.turn !== undefined && !this.pendingResolveAt) {
+      if (++guard > this.maxSeats) break;
+      const seat = this.seats[this.turn];
+      if (!seat) break;
+      const trumps = seat.hand.filter((c) => isTrump(c, this.trumpSuit)).length;
+      if (!seat.isBot && seat.connected && trumps < 2) {
+        this._log(`${seat.name} 主牌不足 2 张，请手动选择 2 张牌跟金鸡`, 'info');
+        break;
+      }
+      if (!this._autoPlay(this.turn).ok) break;
+    }
   }
 
   _autoPlay(seatIdx) {

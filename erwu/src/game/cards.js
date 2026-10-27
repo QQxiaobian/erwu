@@ -83,7 +83,8 @@ export function detectLead(cards, trumpSuit) {
   if (!cards || cards.length === 0) return null;
   if (cards.length === 1) return 'single';
   if (isJokerPair(cards)) return 'joker';
-  if (isCombo25(cards)) return 'combo25';
+  // 25 组合只有主花色的 2+5 可以领出；其他花色的 2+5 都是常主，不算 25
+  if (isCombo25(cards) && cards[0].s === trumpSuit) return 'combo25';
   const allSameSuit = cards.every((c) => c.s === cards[0].s);
   const anyTrump = cards.some((c) => isTrump(c, trumpSuit));
   if (cards.length >= 2 && allSameSuit && !anyTrump) return 'throw';
@@ -167,26 +168,21 @@ export function validateFollow(hand, played, lead, trumpSuit) {
 
   if (type === 'combo25') {
     if (played.length !== 2) return err('25 组合首出，每人必须跟 2 张牌');
-    const combo = lead.cards;
-    const cs = combo[0].s;
-    const sameSuitTrumps = hand.filter((c) => isTrump(c, trumpSuit) && c.s === cs);
-    if (sameSuitTrumps.length >= 2) {
-      const ok = played.every((c) => isTrump(c, trumpSuit) && c.s === cs);
-      if (!ok) return err(`必须跟 2 张${SUIT_NAMES[cs]}主牌`);
+    const cs = lead.cards[0].s;
+    const same = hand.filter((c) => c.s === cs);
+    // 手里有 2 张该花色：必须跟 2 张，不能拿常主顶替
+    if (same.length >= 2) {
+      if (!played.every((c) => c.s === cs)) return err(`必须跟 2 张${SUIT_NAMES[cs]}`);
       return { ok: true };
     }
-    if (trumps.length >= 2) {
-      if (!played.every((c) => isTrump(c, trumpSuit))) {
-        return err('手里有 2 张以上主牌，必须跟 2 张主牌');
+    // 只有 1 张：必须带出这张，另一张自由选择（副牌、常主均可）
+    if (same.length === 1) {
+      if (!played.some((c) => c.id === same[0].id)) {
+        return err(`必须带出仅有的一张${SUIT_NAMES[cs]}`);
       }
       return { ok: true };
     }
-    if (trumps.length === 1) {
-      if (!played.some((c) => isTrump(c, trumpSuit))) {
-        return err('手里有 1 张主牌，必须带出这张主牌');
-      }
-      return { ok: true };
-    }
+    // 一张都没有：2 张自由选择
     return { ok: true };
   }
 
@@ -271,7 +267,10 @@ export function resolveTrick(lead, plays, trumpSuit) {
   if (type === 'combo25') {
     const joker = plays.find((p) => p.cards.length === 2 && isJokerPair(p.cards));
     if (joker) return joker.seat;
-    const combos = plays.filter((p) => p.cards.length === 2 && isCombo25(p.cards, trumpSuit));
+    // 只有主花色的 2+5 才算 25；其他花色的 2+5 按普通主牌比较
+    const combos = plays.filter(
+      (p) => p.cards.length === 2 && isCombo25(p.cards, trumpSuit) && p.cards[0].s === lead.cards[0].s,
+    );
     if (combos.length) {
       let best = combos[0];
       let bestPw = Math.max(...best.cards.map((c) => power(c, trumpSuit)));
@@ -444,13 +443,14 @@ export function autoSelect(hand, lead, trumpSuit) {
 
   if (lead.type === 'combo25') {
     const cs = lead.cards[0].s;
-    const sameSuitTrumps = hand
-      .filter((c) => isTrump(c, trumpSuit) && c.s === cs)
-      .sort((a, b) => power(a, trumpSuit) - power(b, trumpSuit));
-    if (sameSuitTrumps.length >= 2) return sameSuitTrumps.slice(0, 2);
-    if (trumps.length >= 2) return trumps.slice(0, 2);
-    if (trumps.length === 1) return [trumps[0], nonTrumps[0]];
-    return nonTrumps.slice(0, 2);
+    const same = hand.filter((c) => c.s === cs).sort((a, b) => power(a, trumpSuit) - power(b, trumpSuit));
+    if (same.length >= 2) return same.slice(0, 2);
+    if (same.length === 1) {
+      const rest = hand.filter((c) => c.id !== same[0].id);
+      const fill = rest.find((c) => !isTrump(c, trumpSuit)) || rest[0];
+      return fill ? [same[0], fill] : [same[0]];
+    }
+    return hand.slice(0, 2);
   }
 
   if (lead.type === 'throw') {
