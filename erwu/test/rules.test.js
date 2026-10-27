@@ -312,7 +312,7 @@ test('甩牌时有同花色副牌不能毙牌', () => {
   assert.ok(validateFollow(hand2, [c('H3'), c('H6')], lead, 'H').ok);
 });
 
-test('金鸡首出后系统自动为其余玩家跟牌', () => {
+test('金鸡首出：人机自动跟，真人主牌不足 2 张时停下等手动选牌', () => {
   const room = newRoom('grab', 4);
   room.startRound('u0');
   room.state = 'playing';
@@ -320,15 +320,50 @@ test('金鸡首出后系统自动为其余玩家跟牌', () => {
   room.turn = 0;
   room.trick = { lead: null, plays: [] };
   room.seats[0].hand = [c('BJ'), c('LJ'), c('C3'), c('D4')];
-  for (let i = 1; i < 4; i++) room.seats[i].hand = [c('HA'), c('H2'), c('SK'), c('C9')];
+  // 1、2 号位是人机，主牌各 2 张，由系统自动跟
+  room.seats[1].hand = [c('HA'), c('H2'), c('SK'), c('C9')];
+  room.seats[2].hand = [c('HA'), c('H2'), c('SK'), c('C9')];
+  room.seats[1].isBot = true;
+  room.seats[2].isBot = true;
+  // 3 号位是真人且一张主牌都没有，必须自己选 2 张
+  room.seats[3].hand = [c('SA'), c('SK'), c('C9'), c('D7')];
   const res = room.play('u0', ['BJ', 'LJ']);
   assert.ok(res.ok, res.error);
   assert.equal(room.trick.lead.type, 'joker');
-  assert.equal(room.trick.plays.length, 4, '其余玩家应被系统自动跟牌');
-  for (let i = 1; i < 4; i++) {
-    assert.equal(room.trick.plays[i].cards.length, 2, '每人自动跟 2 张主牌');
+  assert.equal(room.trick.plays.length, 3, '人机自动跟牌后，主牌不足的真人应停下');
+  for (const i of [1, 2]) {
+    assert.equal(room.trick.plays[i].cards.length, 2, '人机自动跟 2 张主牌');
     assert.ok(room.trick.plays[i].cards.every((x) => isTrump(x, 'H')));
   }
+  assert.equal(room.turn, 3, '轮到主牌不足的真人手动选牌');
+  // 无主牌时可自由选 2 张，出牌后本墩凑满 4 家
+  const manual = room.play('u3', ['SA', 'SK']);
+  assert.ok(manual.ok, manual.error);
+  assert.equal(room.trick.plays.length, 4);
+  assert.equal(room.trick.plays[3].cards.length, 2);
+});
+
+test('金鸡首出：真人只有 1 张主牌必须手动带出该主牌', () => {
+  const room = newRoom('grab', 4);
+  room.startRound('u0');
+  room.state = 'playing';
+  room.trumpSuit = 'H';
+  room.turn = 0;
+  room.trick = { lead: null, plays: [] };
+  room.seats[0].hand = [c('BJ'), c('LJ'), c('C3'), c('D4')];
+  room.seats[1].hand = [c('HA'), c('SK'), c('C9'), c('D7')];
+  room.seats[2].hand = [c('H3'), c('H4'), c('SK'), c('C9')];
+  room.seats[3].hand = [c('H6'), c('H7'), c('SK'), c('C9')];
+  room.seats[2].isBot = true;
+  room.seats[3].isBot = true;
+  assert.ok(room.play('u0', ['BJ', 'LJ']).ok);
+  assert.equal(room.turn, 1, '只有 1 张主牌的真人应停下');
+  assert.equal(room.trick.plays.length, 1);
+  // 不带出仅有的一张主牌会被拒绝
+  assert.ok(!room.play('u1', ['SK', 'C9']).ok);
+  const r = room.play('u1', ['HA', 'SK']);
+  assert.ok(r.ok, r.error);
+  assert.equal(room.trick.plays.length, 4, '真人出牌后其余人机继续自动跟牌');
 });
 
 test('噶点模式：全员过牌一直重发，不保底', () => {
