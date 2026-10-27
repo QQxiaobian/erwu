@@ -70,7 +70,8 @@ console.log('牌型识别');
 test('单张 / 金鸡 / 25 / 甩牌', () => {
   assert.equal(detectLead([c('HA')], 'S'), 'single');
   assert.equal(detectLead([c('BJ'), c('LJ')], 'S'), 'joker');
-  assert.equal(detectLead([c('C2'), c('C5')], 'S'), 'combo25');
+  assert.equal(detectLead([c('S2'), c('S5')], 'S'), 'combo25');
+  assert.equal(detectLead([c('C2'), c('C5')], 'S'), null, '副花色 2+5 都是常主，不算 25');
   assert.equal(detectLead([c('HK'), c('HQ')], 'S'), 'throw');
   assert.equal(detectLead([c('HK'), c('SQ')], 'S'), null);
   assert.equal(detectLead([c('SA'), c('SK')], 'S'), null);
@@ -136,9 +137,28 @@ test('托管金鸡跟牌选最大两张主牌', () => {
 });
 test('25 组合跟 2 张主牌', () => {
   const hand = [c('H5'), c('S3'), c('H3')];
-  const lead = { seat: 0, cards: [c('C2'), c('C5')], type: 'combo25' };
+  const lead = { seat: 0, cards: [c('S2'), c('S5')], type: 'combo25' };
   assert.ok(!validateFollow(hand, [c('H5'), c('H3')], lead, 'S').ok);
   assert.ok(validateFollow(hand, [c('H5'), c('S3')], lead, 'S').ok);
+});
+test('跟主 25：有 2 张同花色必须跟同花色，不能拿常主顶替', () => {
+  const hand = [c('H3'), c('H4'), c('BJ')];
+  const lead = { seat: 0, cards: [c('H2'), c('H5')], type: 'combo25' };
+  assert.ok(!validateFollow(hand, [c('BJ'), c('H3')], lead, 'H').ok);
+  assert.ok(validateFollow(hand, [c('H3'), c('H4')], lead, 'H').ok);
+});
+test('跟主 25：只有 1 张同花色必须带出，另一张自由选择', () => {
+  const hand = [c('H3'), c('BJ'), c('D4')];
+  const lead = { seat: 0, cards: [c('H2'), c('H5')], type: 'combo25' };
+  assert.ok(!validateFollow(hand, [c('BJ'), c('D4')], lead, 'H').ok);
+  assert.ok(validateFollow(hand, [c('H3'), c('BJ')], lead, 'H').ok);
+  assert.ok(validateFollow(hand, [c('H3'), c('D4')], lead, 'H').ok);
+});
+test('跟主 25：没有同花色时自由出 2 张', () => {
+  const hand = [c('C3'), c('D4'), c('BJ')];
+  const lead = { seat: 0, cards: [c('H2'), c('H5')], type: 'combo25' };
+  assert.ok(validateFollow(hand, [c('C3'), c('D4')], lead, 'H').ok);
+  assert.ok(validateFollow(hand, [c('BJ'), c('C3')], lead, 'H').ok);
 });
 test('甩牌足额跟同花色', () => {
   const hand = [c('H3'), c('H4'), c('D5'), c('SA')];
@@ -185,9 +205,9 @@ test('金鸡直接赢墩', () => {
   assert.equal(resolveTrick(lead, plays, 'S'), 0);
 });
 test('25 组合之间同点数相等，25 压普通主牌，金鸡压 25', () => {
-  const lead = { seat: 0, cards: [c('C2'), c('C5')], type: 'combo25' };
+  const lead = { seat: 0, cards: [c('S2'), c('S5')], type: 'combo25' };
   const plays = [
-    { seat: 0, cards: [c('C2'), c('C5')] },
+    { seat: 0, cards: [c('S2'), c('S5')] },
     { seat: 1, cards: [c('H5'), c('S3')] },
     { seat: 2, cards: [c('D2'), c('D5')] },
     { seat: 3, cards: [c('BJ'), c('LJ')] },
@@ -196,13 +216,10 @@ test('25 组合之间同点数相等，25 压普通主牌，金鸡压 25', () =>
   const plays2 = plays.slice(0, 3).concat([{ seat: 3, cards: [c('H3'), c('H4')] }]);
   assert.equal(resolveTrick(lead, plays2, 'S'), 0);
 });
-test('主花色 25 组合大于其他花色 25 组合', () => {
-  const lead = { seat: 0, cards: [c('C2'), c('C5')], type: 'combo25' };
-  const plays = [
-    { seat: 0, cards: [c('C2'), c('C5')] },
-    { seat: 1, cards: [c('S2'), c('S5')] },
-  ];
-  assert.equal(resolveTrick(lead, plays, 'S'), 1);
+test('只有主花色 2+5 能作为 25 领出', () => {
+  assert.equal(detectLead([c('H2'), c('H5')], 'H'), 'combo25');
+  assert.equal(detectLead([c('C2'), c('C5')], 'H'), null);
+  assert.equal(detectLead([c('S2'), c('S5')], 'H'), null);
 });
 test('甩牌：主牌杀牌后比最大主', () => {
   const lead = { seat: 0, cards: [c('HA'), c('HK')], type: 'throw' };

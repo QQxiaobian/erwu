@@ -1025,9 +1025,17 @@ function phasePlaying(r) {
   const myTurn = r.turn === r.mySeat;
   const lead = r.trick && r.trick.lead;
   const n = state.selected.size;
-  const desc = myTurn
-    ? `轮到你${lead ? '跟牌' : '首出'}${lead ? `（首出：${LEAD_NAME[lead.type] || ''}）` : ''}，已选 ${n} 张。`
-    : `等待 ${esc(seatName(r.turn))} 出牌…`;
+  const trumpCount = (r.hand || []).filter((c) => isTrumpC(c, r.trumpSuit)).length;
+  let desc;
+  if (!myTurn) {
+    desc = `等待 ${esc(seatName(r.turn))} 出牌…`;
+  } else if (lead && lead.type === 'joker' && trumpCount < 2) {
+    desc = `跟金鸡：你只有 ${trumpCount} 张主牌，请手动选择 2 张牌（${
+      trumpCount === 1 ? '须带出仅有的一张主牌' : '可以不拆主牌'
+    }），已选 ${n} 张。`;
+  } else {
+    desc = `轮到你${lead ? '跟牌' : '首出'}${lead ? `（首出：${LEAD_NAME[lead.type] || ''}）` : ''}，已选 ${n} 张。`;
+  }
   const actions = myTurn
     ? `<span class="chip gold">${describeSelection(selectedCards(), r.trumpSuit, lead)}</span>
       <button class="btn small ghost" data-action="clear">清空</button>
