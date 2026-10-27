@@ -816,7 +816,9 @@ export class Room {
     const bottomPoints = handPoints(this.bottom);
     const decl = this.declarerSeat;
     const captured = this.seats.map((s) => s.captured);
-    const isDefenderLast = lastWinner !== decl;
+    // 队家模式：庄家的搭档赢下最后一墩同样算庄家方拿底
+    const isDefenderLast =
+      this.mode === 'team' ? lastWinner % 2 !== decl % 2 : lastWinner !== decl;
     const bottomToDeclarer = !isDefenderLast ? bottomPoints : 0;
     const bottomToDefenders = isDefenderLast ? bottomPoints * 2 : 0;
 

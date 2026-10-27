@@ -415,6 +415,45 @@ test('队家模式：发牌前按顺序轮换庄家', () => {
   assert.equal(room.dealerSeat, 0);
 });
 
+test('队家模式：庄家的搭档赢下最后一墩同样算庄家方拿底', () => {
+  const room = newRoom('team', 4);
+  room.startRound('u0');
+  room.declarerSeat = 0;
+  room.bankerTeam = 0;
+  room.trumpSuit = 'S';
+  room.bottom = [c('H10')]; // 底牌 10 分
+  room.seats.forEach((s) => (s.captured = 0));
+  room.seats[0].captured = 20;
+  room.seats[2].captured = 20; // 庄家队 40 分
+  room.seats[1].captured = 20;
+  room.seats[3].captured = 10; // 常家队 30 分
+  room._finishRound(2); // 2 号位是庄家的搭档
+  const res = room.result;
+  assert.equal(res.bottomDoubled, false, '搭档拿底不算抠底');
+  assert.equal(res.declarerPoints, 50);
+  assert.equal(res.defenderPoints, 30);
+  assert.equal(res.winnerSide, 'declarer');
+});
+
+test('队家模式：常家赢下最后一墩则底牌翻倍', () => {
+  const room = newRoom('team', 4);
+  room.startRound('u0');
+  room.declarerSeat = 0;
+  room.bankerTeam = 0;
+  room.trumpSuit = 'S';
+  room.bottom = [c('H10')];
+  room.seats.forEach((s) => (s.captured = 0));
+  room.seats[0].captured = 20;
+  room.seats[2].captured = 20;
+  room.seats[1].captured = 20;
+  room.seats[3].captured = 10;
+  room._finishRound(1); // 1 号位是常家
+  const res = room.result;
+  assert.equal(res.bottomDoubled, true);
+  assert.equal(res.declarerPoints, 40);
+  assert.equal(res.defenderPoints, 50); // 30 + 10×2
+});
+
 test('队家模式：亮主只决定主花色，不改变庄家', () => {
   const room = newRoom('team', 4);
   room.startRound('u0');
